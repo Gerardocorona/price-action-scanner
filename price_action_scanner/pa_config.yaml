@@ -85,7 +85,7 @@ pattern_detectors:
     confidence_weight: 1.8    # Alta confianza — patrón confirmado hoy
 
   bear_trap:
-    enabled: true
+    enabled: false            # ← DESACTIVADO: 0% WR, -24pts en backtest. Necesita refinamiento.
     lookback_bars: 10
     touch_zone: 2.0
     min_touches: 2
@@ -93,9 +93,9 @@ pattern_detectors:
     confidence_weight: 1.8
 
   second_candle:
-    enabled: true
-    min_body_ratio: 0.50      # ← AUMENTADO: Body >= 50% (vela decisiva, no doji, User calibration)
-    confidence_weight: 2.0    # ← AUMENTADO: Confirmación de dirección (1.5 → 2.0)
+    enabled: false            # ← DESACTIVADO: Patrón causando -67pts en backtest (38% WR). Confiar en inside_bar/pin_bar/engulfing
+    min_body_ratio: 0.50      # Valor guardado para referencia futura
+    confidence_weight: 2.0    # Valor guardado para referencia futura
 
 # ── RANGO OPERATIVO (Bollinger Basis) ────────────────────────────────────
 range_trading:
