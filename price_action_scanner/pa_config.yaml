@@ -121,9 +121,10 @@ break_and_retest:
 # ── DETECCIÓN DE MERCADO LATERAL ──────────────────────────────────────────
 lateral_market:
   enabled: true
-  max_range_points: 50.0    # ← IMPORTANTE: Rango máximo para detectar consolidación (50pts en 5m = aprox 1-2 hrs)
+  max_range_points: 10.0    # ← CALIBRADO VISUAL: Lateralidad real = 6-8 pts (usuario mostró zona de 6.86pts en TradingView)
   min_directional_bars_pct: 0.45  # Si < 45% bars son direccionales → lateral (más sensible, detecta consolidación mejor)
-  lookback_bars: 15         # ← REFINADO: Analizar últimas 15 barras (20 → 15, User visual)
+  lookback_bars: 20               # ← AUMENTADO: 20 barras en 5m = ~100 min (lateral puede durar 2-3 horas)
+  directional_body_threshold: 3.0 # ← CRÍTICO NUEVO: Body > 3pts = barra direccional. (era 0.5 hardcodeado = bug)
 
 # ── CONFLUENCIA (Verificación de Factores) ────────────────────────────────
 confluence:

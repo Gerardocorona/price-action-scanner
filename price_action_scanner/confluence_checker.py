@@ -354,11 +354,13 @@ class ConfluenceChecker:
         lows = [b['low'] for b in bars_to_check]
         total_range = max(highs) - min(lows)
 
-        # Barras directivas (cambio > 0.5 pt en close vs open)
+        # Barras directivas (body > threshold = movimiento con dirección real)
+        # CALIBRADO: En SPX, body de 0.5pt es ruido. Threshold real = 3.0pts (del config)
+        body_threshold = self.lateral_cfg.get('directional_body_threshold', 3.0)
         directional = 0
         for bar in bars_to_check:
             body = abs(bar['close'] - bar['open'])
-            if body > 0.5:
+            if body > body_threshold:
                 directional += 1
 
         directional_pct = directional / len(bars_to_check)
