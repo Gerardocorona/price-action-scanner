@@ -84,12 +84,81 @@ class ConfluenceChecker:
             break_direction=break_direction,
         )
 
+    def compute_bollinger(self, bars: List[Dict], length: int = 20, mult: float = 2.0) -> Dict:
+        """
+        Calcula Bollinger Bands a partir de barras.
+        Returns: {'upper': float, 'basis': float, 'lower': float}
+        """
+        if len(bars) < length:
+            closes = [b['close'] for b in bars]
+        else:
+            closes = [b['close'] for b in bars[-length:]]
+
+        basis = sum(closes) / len(closes)
+        variance = sum((c - basis) ** 2 for c in closes) / len(closes)
+        std = variance ** 0.5
+        return {
+            'upper': basis + mult * std,
+            'basis': basis,
+            'lower': basis - mult * std,
+        }
+
+    def detect_range_position(
+        self,
+        current_price: float,
+        bars_2m: List[Dict],
+        resistance: Optional[float] = None,
+    ) -> Dict:
+        """
+        Detecta la posición del precio dentro del rango operativo:
+          Techo = resistencia confirmada (o BB Upper)
+          Piso  = BB Basis (línea azul)
+
+        Returns:
+            {
+                'range_top': float,
+                'range_bottom': float,
+                'range_size': float,
+                'position': 'at_top' | 'at_bottom' | 'middle',
+                'bb': {'upper', 'basis', 'lower'},
+                'pct_in_range': float (0.0=bottom, 1.0=top),
+            }
+        """
+        bb = self.compute_bollinger(bars_2m)
+        range_top = resistance if resistance else bb['upper']
+        range_bottom = bb['basis']
+        range_size = range_top - range_bottom
+
+        if range_size <= 0:
+            pct = 0.5
+        else:
+            pct = (current_price - range_bottom) / range_size
+
+        zone_pct = self.cfg.get('range_trading', {}).get('zone_pct', 0.15)
+        if pct >= (1.0 - zone_pct):
+            position = 'at_top'
+        elif pct <= zone_pct:
+            position = 'at_bottom'
+        else:
+            position = 'middle'
+
+        return {
+            'range_top': range_top,
+            'range_bottom': range_bottom,
+            'range_size': range_size,
+            'position': position,
+            'bb': bb,
+            'pct_in_range': pct,
+        }
+
     def check(
         self,
         pattern: PatternData,
         trend: TrendContext,
         current_price: float,
         bars_5m: Optional[List[Dict]] = None,
+        bars_2m: Optional[List[Dict]] = None,
+        resistance: Optional[float] = None,
     ) -> ConfluenceData:
         """
         Verifica confluencia y genera score de validez.
@@ -185,6 +254,43 @@ class ConfluenceChecker:
             confluence.score += peso
             confluence.weights_applied['ma_positioning'] = peso
 
+        # ─ FACTOR 9: POSICIÓN EN RANGO BB (techo/piso) ─────────────────
+        if bars_2m and len(bars_2m) >= 5:
+            rng = self.detect_range_position(current_price, bars_2m, resistance)
+            range_weights = self.confluence_cfg.get('factor_weights', {})
+
+            # PUT: precio en techo del rango + patrón bearish
+            if rng['position'] == 'at_top' and pattern.direction == 'bearish':
+                peso = range_weights.get('range_at_extreme', 1.8)
+                confluence.factors.append(
+                    f"range_at_top_{rng['range_top']:.0f}"
+                )
+                confluence.score += peso
+                confluence.weights_applied['range_at_extreme'] = peso
+
+            # CALL: precio en piso del rango + patrón bullish
+            elif rng['position'] == 'at_bottom' and pattern.direction == 'bullish':
+                peso = range_weights.get('range_at_extreme', 1.8)
+                confluence.factors.append(
+                    f"range_at_bottom_{rng['range_bottom']:.0f}"
+                )
+                confluence.score += peso
+                confluence.weights_applied['range_at_extreme'] = peso
+
+        # ─ FACTOR 10: BULL/BEAR TRAP PATTERN ───────────────────────────
+        if pattern.pattern_type in ('bull_trap', 'bear_trap'):
+            peso = range_weights.get('trap_pattern', 2.0) if bars_2m else 2.0
+            confluence.factors.append(f"trap_{pattern.pattern_type}")
+            confluence.score += peso
+            confluence.weights_applied['trap_pattern'] = peso
+
+        # ─ FACTOR 11: SEGUNDA VELA CONFIRMACIÓN ────────────────────────
+        if pattern.pattern_type == 'second_candle':
+            peso = range_weights.get('second_candle_confirm', 1.5) if bars_2m else 1.5
+            confluence.factors.append(f"second_candle_{pattern.direction}")
+            confluence.score += peso
+            confluence.weights_applied['second_candle_confirm'] = peso
+
         # ─ VALIDAR MÍNIMO ───────────────────────────────────────────────
         confluence.factors_count = len(confluence.factors)
         confluence.nearest_level = nearest_level
@@ -263,6 +369,43 @@ class ConfluenceChecker:
         )
 
         return is_lateral, total_range
+
+    def detect_breakout_from_lateral(self, bars: List[Dict]) -> Tuple[bool, Optional[str]]:
+        """
+        Detecta ruptura de lateralidad confirmada con vela envolvente (engulfing).
+
+        Reglas:
+        1. Detectar si está en lateral
+        2. Última barra debe ser vela envolvente (engulfing)
+        3. Dirección de la ruptura
+
+        Returns:
+            (breakout_confirmed, direction) donde direction es 'bullish' o 'bearish'
+        """
+        if len(bars) < 2:
+            return False, None
+
+        is_lateral, _ = self._detect_lateral_market(bars[:-1])  # Checamos lateralidad sin la última vela
+        if not is_lateral:
+            return False, None
+
+        # Última barra (la que rompe)
+        last_bar = bars[-1]
+        prev_bar = bars[-2]
+
+        # Vela envolvente alcista (engulfing bullish)
+        if (last_bar['open'] <= prev_bar['close'] and
+            last_bar['close'] > prev_bar['open'] and
+            last_bar['close'] > prev_bar['close']):
+            return True, 'bullish'
+
+        # Vela envolvente bajista (engulfing bearish)
+        if (last_bar['open'] >= prev_bar['close'] and
+            last_bar['close'] < prev_bar['open'] and
+            last_bar['close'] < prev_bar['close']):
+            return True, 'bearish'
+
+        return False, None
 
     def _detect_break_and_retest(self, bars: List[Dict]) -> Tuple[bool, Optional[str]]:
         """

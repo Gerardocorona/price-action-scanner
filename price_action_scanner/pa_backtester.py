@@ -39,9 +39,9 @@ for _p in (_ROOT_DIR, _ENGINE_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from scanners.price_action_scanner.pa_detector import PriceActionDetector
-from scanners.price_action_scanner.confluence_checker import ConfluenceChecker
-from scanners.price_action_scanner.pa_signal_schema import (
+from .pa_detector import PriceActionDetector
+from .confluence_checker import ConfluenceChecker
+from .pa_signal_schema import (
     PatternData,
     TrendContext,
     ConfluenceData,

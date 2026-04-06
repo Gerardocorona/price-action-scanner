@@ -47,27 +47,20 @@ from .calibration_validator import CalibrationValidator
 from .pa_calibrator import PriceActionCalibrator
 from .pa_labeling_tool import PriceActionLabelingTool
 
-# Backtesting & simulation
-from .pa_backtester import (
-    PriceActionBacktester,
-    Trade,
-    BacktestResult,
-)
-from .pa_montecarlo import (
-    MonteCarloSimulator,
-    MonteCarloResult,
-)
-from .pa_montecarlo_compound import (
-    CompoundMonteCarloSimulator,
-    CompoundResult,
-)
-from .pa_optimizer import (
-    PriceActionOptimizer,
-    OptimizationResult,
-)
+# Backtesting & simulation (lazy — require pandas/yfinance)
+try:
+    from .pa_backtester import PriceActionBacktester, Trade, BacktestResult
+    from .pa_montecarlo import MonteCarloSimulator, MonteCarloResult
+    from .pa_montecarlo_compound import CompoundMonteCarloSimulator, CompoundResult
+    from .pa_optimizer import PriceActionOptimizer, OptimizationResult
+except ImportError:
+    pass
 
 # Reporting
-from .pa_report_generator import PriceActionReportGenerator
+try:
+    from .pa_report_generator import PriceActionReportGenerator
+except ImportError:
+    pass
 
 __all__ = [
     # Signal schemas

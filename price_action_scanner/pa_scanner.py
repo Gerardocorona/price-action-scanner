@@ -237,19 +237,37 @@ class PriceActionScanner:
 
         # Verificar mercado lateral en 5m (filtro principal)
         if trend.is_lateral_market:
-            logger.info(
-                f"[PA-Scanner] ⚠️ LATERAL detectado en 5m "
-                f"(rango={trend.lateral_range_points:.1f}pts). No operar."
-            )
-            self._signals_rejected += 1
-            return None
+            # REGLA CRÍTICA: NO OPERAR EN LATERAL
+            # Solo continuar si hay ruptura confirmada con vela envolvente
+            breakout_detected, breakout_direction = self.checker.detect_breakout_from_lateral(bars_5m)
+
+            if not breakout_detected:
+                logger.info(
+                    f"[PA-Scanner] ⚠️ LATERAL detectado en 5m "
+                    f"(rango={trend.lateral_range_points:.1f}pts). No operar sin ruptura."
+                )
+                self._signals_rejected += 1
+                return None
+            else:
+                logger.info(
+                    f"[PA-Scanner] ✅ RUPTURA DE LATERAL detectada ({breakout_direction}) "
+                    f"con confirmación de vela envolvente. Proceder con análisis."
+                )
 
         # ── PASO 3: Verificar confluencia ─────────────────────────────────────
+        # Detectar resistencia dinámica para rango operativo
+        resistance = None
+        if bars_2m and len(bars_2m) >= 10:
+            recent_highs = [b['high'] for b in bars_2m[-20:]]
+            resistance = max(recent_highs)
+
         confluence = self.checker.check(
             pattern=pattern,
             trend=trend,
             current_price=current_price,
             bars_5m=bars_5m,
+            bars_2m=bars_2m,
+            resistance=resistance,
         )
 
         self._signals_detected += 1
