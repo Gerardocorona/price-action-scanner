@@ -62,8 +62,10 @@ class ConfluenceChecker:
         trend_5m = self._analyze_trend(bars_5m)
         trend_2m = self._analyze_trend(bars_2m)
 
-        # Detectar mercado lateral en 5m (filtro principal)
-        is_lateral, lateral_range = self._detect_lateral_market(bars_5m)
+        # Detectar mercado lateral en 2m (más preciso — zona lateral visible en timeframe de entrada)
+        # NOTA: En 5m una ventana de 20 barras = 100 min, rango siempre > 10pts
+        #       En 2m una ventana de 20 barras = 40 min, rango lateral = 6-10pts (correcto)
+        is_lateral, lateral_range = self._detect_lateral_market(bars_2m if bars_2m else bars_5m)
 
         # Analizar posición vs promedios móviles
         price_vs_ma20_5m = self._price_vs_ma(bars_5m)

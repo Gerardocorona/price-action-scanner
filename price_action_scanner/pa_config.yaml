@@ -124,7 +124,7 @@ lateral_market:
   max_range_points: 10.0    # ← CALIBRADO VISUAL: Lateralidad real = 6-8 pts (usuario mostró zona de 6.86pts en TradingView)
   min_directional_bars_pct: 0.45  # Si < 45% bars son direccionales → lateral (más sensible, detecta consolidación mejor)
   lookback_bars: 20               # ← AUMENTADO: 20 barras en 5m = ~100 min (lateral puede durar 2-3 horas)
-  directional_body_threshold: 3.0 # ← CRÍTICO NUEVO: Body > 3pts = barra direccional. (era 0.5 hardcodeado = bug)
+  directional_body_threshold: 1.5 # ← AJUSTADO PARA 2m: Body > 1.5pts = barra direccional en 2m (3.0 era para 5m)
 
 # ── CONFLUENCIA (Verificación de Factores) ────────────────────────────────
 confluence:
