@@ -121,7 +121,7 @@ break_and_retest:
 # ── DETECCIÓN DE MERCADO LATERAL ──────────────────────────────────────────
 lateral_market:
   enabled: true
-  max_range_points: 25.0    # ← AJUSTADO PARA 5m: Rango en 5m típicamente > 12pts (25 es más realista para consolidación)
+  max_range_points: 50.0    # ← IMPORTANTE: Rango máximo para detectar consolidación (50pts en 5m = aprox 1-2 hrs)
   min_directional_bars_pct: 0.45  # Si < 45% bars son direccionales → lateral (más sensible, detecta consolidación mejor)
   lookback_bars: 15         # ← REFINADO: Analizar últimas 15 barras (20 → 15, User visual)
 
