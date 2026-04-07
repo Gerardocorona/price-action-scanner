@@ -1,0 +1,16 @@
+# Price Action Scanner — Dependencias
+# Instalar con: pip install -r requirements.txt
+
+# Core
+pyyaml>=6.0
+numpy>=1.24
+pandas>=2.0
+
+# HTTP (para SignalRouter → Bot Alfa)
+aiohttp>=3.9
+
+# Backtesting / Análisis
+scipy>=1.10
+
+# Opcional: IBKR data feed en producción
+# ib_insync>=0.9.86

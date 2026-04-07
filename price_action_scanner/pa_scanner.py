@@ -40,6 +40,7 @@ from .confluence_checker import ConfluenceChecker
 from .pa_detector import PriceActionDetector
 from .pa_signal_schema import PriceActionSignal
 from .signal_generator import SignalGenerator
+from .signal_router import SignalRouter
 
 logger = logging.getLogger("ibg.price_action.scanner")
 
@@ -71,7 +72,22 @@ class PriceActionScanner:
         db_manager=None,
         broker_service=None,
         config_path: str = _CFG_PATH,
+        auto_execute: bool = False,
+        bot_url: str = "http://localhost:8001",
+        risk_pct: float = 0.20,
+        dry_run: bool = True,
     ):
+        """
+        Args:
+            ib_client:      IBClient para datos en vivo (opcional)
+            db_manager:     DBManager para persistencia (opcional)
+            broker_service: BrokerService legacy (opcional, reemplazado por SignalRouter)
+            config_path:    Ruta a pa_config.yaml
+            auto_execute:   Si True, envía órdenes automáticamente al Bot Alfa via SignalRouter
+            bot_url:        URL del servidor Bot Alfa (default: http://localhost:8001)
+            risk_pct:       Fracción del balance a arriesgar por trade (default: 0.20 = 20%)
+            dry_run:        Si True (default), calcula qty pero NO envía orden. Cambiar a False para producción.
+        """
         self._ib = ib_client
         self._db = db_manager
         self._broker = broker_service
@@ -90,6 +106,14 @@ class PriceActionScanner:
             config_path=config_path,
         )
 
+        # ── SIGNAL ROUTER (integración con Bot Alfa / IBKR) ─────────────────
+        self._auto_execute = auto_execute
+        self.router = SignalRouter(
+            base_url=bot_url,
+            risk_pct=risk_pct,
+            dry_run=dry_run,
+        ) if auto_execute else None
+
         # Estadísticas de sesión
         self._running = False
         self._signals_detected = 0
@@ -97,7 +121,9 @@ class PriceActionScanner:
         self._signals_rejected = 0
         self._session_start = None
 
-        logger.info("[PA-Scanner] Price Action Scanner inicializado")
+        mode = "AUTO-EXECUTE" if auto_execute else "SCAN-ONLY"
+        dry_tag = " [DRY-RUN]" if (auto_execute and dry_run) else ""
+        logger.info(f"[PA-Scanner] Price Action Scanner inicializado | Modo: {mode}{dry_tag}")
 
     async def start(self):
         """
@@ -128,6 +154,9 @@ class PriceActionScanner:
     async def stop(self):
         """Detiene el scanner limpiamente"""
         self._running = False
+        # Cerrar sesión HTTP del router si está activa
+        if self.router:
+            await self.router.close()
         logger.info(
             f"[PA-Scanner] Detenido. Sesión: "
             f"{self._signals_detected} detectadas, "
@@ -291,6 +320,31 @@ class PriceActionScanner:
         if signal and signal.order_generated:
             self._signals_sent += 1
             logger.info(f"[PA-Scanner] ✅ {signal.summary()}")
+
+            # ── SIGNAL ROUTER: Enviar orden automáticamente al Bot Alfa ──────
+            if self._auto_execute and self.router:
+                try:
+                    router_result = await self.router.route_signal(signal)
+                    if router_result.get("success"):
+                        qty = router_result.get("qty", "?")
+                        ask = router_result.get("ask", 0)
+                        risked = router_result.get("capital_risked", 0)
+                        contract = router_result.get("contract", "?")
+                        dry = " [DRY-RUN]" if router_result.get("dry_run") else ""
+                        signal.order_data.broker_order_id = router_result.get(
+                            "broker_response", {}
+                        ).get("message", contract)
+                        signal.status = "order_sent"
+                        logger.info(
+                            f"[PA-Scanner] 🚀 IBKR{dry}: {signal.order_data.direction} "
+                            f"{qty}c @ ${ask:.2f} | Arriesgado: ${risked:,.2f} | {contract}"
+                        )
+                    else:
+                        logger.error(
+                            f"[PA-Scanner] ⚠️  Router falló: {router_result.get('message')}"
+                        )
+                except Exception as e:
+                    logger.error(f"[PA-Scanner] Error en SignalRouter: {e}", exc_info=True)
 
         return signal
 
