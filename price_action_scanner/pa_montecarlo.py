@@ -780,7 +780,7 @@ def main():
     print("=" * 60)
 
     # Importar backtester
-    from pa_backtester import (
+    from .pa_backtester import (
         HistoricalDataProvider,
         PriceActionBacktester,
         print_console_report,
