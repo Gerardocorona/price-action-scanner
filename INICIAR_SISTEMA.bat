@@ -13,8 +13,9 @@ echo  ============================================================
 echo.
 
 :: ── CONFIGURACION DE RUTAS ────────────────────────────────────────────────────
+:: EDITA ESTAS RUTAS SEGÚN TU INSTALACIÓN:
 set BOT_DIR=%~dp0AppTWS
-set SCANNER_DIR=C:\Users\gecor\price-action-scanner
+set SCANNER_DIR=%USERPROFILE%\price-action-scanner
 
 :: ── PYTHON: Usar venv del Bot Alfa si existe ──────────────────────────────────
 if exist "%~dp0venv\Scripts\python.exe" (
