@@ -63,6 +63,17 @@ except ImportError as e:
     logger.error("Asegúrate de correr desde la carpeta price-action-scanner/")
     sys.exit(1)
 
+# ── INTENTAR CARGAR IBCLIENT ──────────────────────────────────────────────
+ib_client = None
+try:
+    from TradingEngine.ib.ib_client import IBClient
+    ib_client = IBClient()
+    logger.info("✅ IBClient conectado a IBKR (puerto 7497)")
+except Exception as e:
+    logger.warning(f"⚠️  IBClient no disponible: {e}")
+    logger.warning("El scanner correrá sin datos de barras (modo demo)")
+    logger.info("Asegúrate de que TWS/IB Gateway está corriendo en puerto 7497")
+
 
 # ── LOOP PRINCIPAL ────────────────────────────────────────────────────────────
 async def main():
@@ -73,6 +84,7 @@ async def main():
         bot_url=BOT_URL,
         risk_pct=RISK_PCT,
         dry_run=DRY_RUN,
+        ib_client=ib_client,
     )
 
     loop = asyncio.get_event_loop()
