@@ -1,0 +1,283 @@
+//@version=6
+indicator("PA Scanner SPX 0DTE v2", shorttitle="PA-Scan v2", overlay=true, max_labels_count=500, max_lines_count=50)
+
+lateral_threshold = input.float(10.0, "Umbral Mercado Lateral (pts)", minval=1.0, maxval=50.0, group="Confluencia")
+min_conf_rev      = input.int(3,      "Extras Mínimos Reversión (de 4)", minval=1, maxval=4, group="Confluencia")
+min_conf_cont     = input.int(2,      "Extras Mínimos Continuación (de 4)", minval=1, maxval=4, group="Confluencia")
+atr_body_mult     = input.float(0.8,  "Vela Fuerte: Body vs ATR",      minval=0.1, maxval=3.0, step=0.1, group="Patrones")
+reversal_bars     = input.int(3,      "Barras previas en tendencia",    minval=2, maxval=10, group="Patrones")
+cooldown_bars     = input.int(12,     "Cooldown entre señales",         minval=5, maxval=50, group="Filtros")
+show_labels       = input.bool(true,  "Mostrar Etiquetas",              group="Visual")
+show_levels       = input.bool(true,  "Mostrar S/R Dinámico",           group="Visual")
+
+// ─── NIVELES S/R: Históricos + Rebotes ───────────────────────────────
+sr_hist_days   = input.int(20,     "Días para Máx/Mín Histórico",  minval=5, maxval=100, group="Niveles S/R")
+sr_tolerance   = input.float(2.0,  "Tolerancia agrupación (pts)",  minval=0.5, maxval=10.0, step=0.5, group="Niveles S/R")
+sr_proximity   = input.float(3.0,  "Distancia inhibición (pts)",   minval=0.5, maxval=20.0, step=0.5, group="Niveles S/R")
+sr_min_touches = input.int(1,      "Toques mínimos para nivel",    minval=1, maxval=10, group="Niveles S/R")
+show_sr        = input.bool(true,  "Mostrar niveles S/R",          group="Niveles S/R")
+
+in_session = not na(time(timeframe.period, "0930-1600", "America/New_York"))
+
+// ─── DATA MULTI-TIMEFRAME ────────────────────────────────────────────
+[c1h, o1h, h1h, l1h] = request.security(syminfo.tickerid, "60", [close, open, high, low], lookahead=barmerge.lookahead_off)
+[c5m, o5m, h5m, l5m] = request.security(syminfo.tickerid, "5",  [close, open, high, low], lookahead=barmerge.lookahead_off)
+
+// Máximo y Mínimo Históricos (N sesiones)
+[hist_high, hist_low] = request.security(syminfo.tickerid, "D", [ta.highest(high, sr_hist_days), ta.lowest(low, sr_hist_days)], lookahead=barmerge.lookahead_off)
+
+// Pivots en 30min para rebotes significativos
+[ph30_raw, pl30_raw] = request.security(syminfo.tickerid, "30", [ta.pivothigh(high, 3, 3), ta.pivotlow(low, 3, 3)], lookahead=barmerge.lookahead_off)
+
+// ─── MOTOR DE SEÑALES ────────────────────────────────────────────────
+atr20 = ta.atr(20)
+body_curr = math.abs(close - open)
+body_bar1 = math.abs(close[1] - open[1])
+rng = high - low
+
+// VELA FUERTE
+strong_bull = close > open and body_curr > atr20 * atr_body_mult
+strong_bear = close < open and body_curr > atr20 * atr_body_mult
+
+// BARRAS PREVIAS EN TENDENCIA OPUESTA
+bear_count = 0
+bull_count = 0
+for i = 1 to reversal_bars
+    if close[i] < open[i]
+        bear_count += 1
+    if close[i] > open[i]
+        bull_count += 1
+
+reversal_bull = bear_count >= math.floor(reversal_bars * 0.6)
+reversal_bear = bull_count >= math.floor(reversal_bars * 0.6)
+
+// GATE REVERSIÓN
+gate_rev_call = strong_bull and reversal_bull
+gate_rev_put  = strong_bear and reversal_bear
+
+// GATE CONTINUACIÓN
+prev_body_hi = math.max(open[1], close[1])
+prev_body_lo = math.min(open[1], close[1])
+engulf_bull = close > open and close[1] < open[1] and open <= prev_body_lo and close >= prev_body_hi
+engulf_bear = close < open and close[1] > open[1] and open >= prev_body_hi and close <= prev_body_lo
+
+body_bar2 = math.abs(close[2] - open[2])
+two_erase_bull = close > open and close[1] > open[1] and close[2] < open[2] and (body_curr + body_bar1) > body_bar2
+two_erase_bear = close < open and close[1] < open[1] and close[2] > open[2] and (body_curr + body_bar1) > body_bar2
+
+gate_cont_call = (engulf_bull or two_erase_bull) and body_curr > atr20 * 0.3
+gate_cont_put  = (engulf_bear or two_erase_bear) and body_curr > atr20 * 0.3
+
+// FACTORES EXTRA
+ema20_1h   = ta.ema(c1h, 20)
+trend_bull = c1h > ema20_1h
+trend_bear = c1h < ema20_1h
+
+hi5m_20  = ta.highest(h5m, 20)
+lo5m_20  = ta.lowest(l5m, 20)
+range_5m = hi5m_20 - lo5m_20
+lateral_ok = range_5m >= lateral_threshold
+
+vol_avg     = ta.sma(volume, 20)
+vol_confirm = volume > vol_avg * 1.2
+
+ema9 = ta.ema(close, 9)
+
+conf_call = (trend_bull ? 1 : 0) + (lateral_ok ? 1 : 0) + (close > ema9 ? 1 : 0) + (vol_confirm ? 1 : 0)
+conf_put  = (trend_bear ? 1 : 0) + (lateral_ok ? 1 : 0) + (close < ema9 ? 1 : 0) + (vol_confirm ? 1 : 0)
+
+// DETECCIÓN
+det_rev_call  = gate_rev_call  and conf_call >= min_conf_rev  and barstate.isconfirmed and in_session
+det_rev_put   = gate_rev_put   and conf_put  >= min_conf_rev  and barstate.isconfirmed and in_session
+det_cont_call = gate_cont_call and conf_call >= min_conf_cont and barstate.isconfirmed and in_session
+det_cont_put  = gate_cont_put  and conf_put  >= min_conf_cont and barstate.isconfirmed and in_session
+
+det_call = det_rev_call or det_cont_call
+det_put  = det_rev_put  or det_cont_put
+
+var int det_call_ago = 999
+var int det_put_ago  = 999
+var bool last_det_was_rev_call = false
+var bool last_det_was_rev_put  = false
+
+det_call_ago := det_call ? 1 : det_call_ago + 1
+det_put_ago  := det_put  ? 1 : det_put_ago  + 1
+if det_call
+    last_det_was_rev_call := det_rev_call
+if det_put
+    last_det_was_rev_put := det_rev_put
+
+// Trigger: dentro de 3 barras después de detección
+trigger_call = det_call_ago >= 1 and det_call_ago <= 3 and close > open and barstate.isconfirmed
+trigger_put  = det_put_ago  >= 1 and det_put_ago  <= 3 and close < open and barstate.isconfirmed
+
+var int bars_since_call = 999
+var int bars_since_put  = 999
+
+// ─── ACUMULACIÓN DE REBOTES (pivots 30min) ───────────────────────────
+var float[] sr_levels  = array.new_float()
+var int[]   sr_touches = array.new_int()
+
+// Solo procesar cuando aparece un NUEVO pivot (evitar contar 15x por cada pivot 30min)
+bool new_ph30 = not na(ph30_raw) and (na(ph30_raw[1]) or ph30_raw != ph30_raw[1])
+bool new_pl30 = not na(pl30_raw) and (na(pl30_raw[1]) or pl30_raw != pl30_raw[1])
+
+if new_ph30
+    bool matched = false
+    if array.size(sr_levels) > 0
+        for i = 0 to array.size(sr_levels) - 1
+            if math.abs(ph30_raw - array.get(sr_levels, i)) <= sr_tolerance
+                int new_cnt = array.get(sr_touches, i) + 1
+                array.set(sr_touches, i, new_cnt)
+                float old_lvl = array.get(sr_levels, i)
+                array.set(sr_levels, i, (old_lvl * (new_cnt - 1) + ph30_raw) / new_cnt)
+                matched := true
+                break
+    if not matched
+        array.push(sr_levels, ph30_raw)
+        array.push(sr_touches, 1)
+
+if new_pl30
+    bool matched = false
+    if array.size(sr_levels) > 0
+        for i = 0 to array.size(sr_levels) - 1
+            if math.abs(pl30_raw - array.get(sr_levels, i)) <= sr_tolerance
+                int new_cnt = array.get(sr_touches, i) + 1
+                array.set(sr_touches, i, new_cnt)
+                float old_lvl = array.get(sr_levels, i)
+                array.set(sr_levels, i, (old_lvl * (new_cnt - 1) + pl30_raw) / new_cnt)
+                matched := true
+                break
+    if not matched
+        array.push(sr_levels, pl30_raw)
+        array.push(sr_touches, 1)
+
+// Poda si excede 50 niveles
+while array.size(sr_levels) > 50
+    int min_idx = 0
+    int min_val = array.get(sr_touches, 0)
+    for i = 1 to array.size(sr_touches) - 1
+        if array.get(sr_touches, i) < min_val
+            min_val := array.get(sr_touches, i)
+            min_idx := i
+    array.remove(sr_levels, min_idx)
+    array.remove(sr_touches, min_idx)
+
+// ─── FILTRO: PROXIMIDAD A NIVELES S/R ────────────────────────────────
+// Silenciar TODAS las señales cuando el precio está cerca de cualquier nivel
+bool near_sr = false
+
+// Check Máximo/Mínimo Histórico
+if not na(hist_high) and math.abs(close - hist_high) <= sr_proximity
+    near_sr := true
+if not na(hist_low) and math.abs(close - hist_low) <= sr_proximity
+    near_sr := true
+
+// Check niveles de rebote
+if array.size(sr_levels) > 0
+    for i = 0 to array.size(sr_levels) - 1
+        if array.get(sr_touches, i) >= sr_min_touches
+            if math.abs(close - array.get(sr_levels, i)) <= sr_proximity
+                near_sr := true
+
+// ─── SEÑALES FINALES (con filtro S/R) ────────────────────────────────
+signal_call = trigger_call and bars_since_call >= cooldown_bars and not near_sr
+signal_put  = trigger_put  and bars_since_put  >= cooldown_bars and not near_sr
+
+bars_since_call := signal_call ? 0 : bars_since_call + 1
+bars_since_put  := signal_put  ? 0 : bars_since_put  + 1
+
+// ─── VISUAL ──────────────────────────────────────────────────────────
+barcolor(signal_call ? color.new(color.lime, 0) : na)
+barcolor(signal_put  ? color.new(color.red,  0) : na)
+
+resistance = ta.highest(high, 20)
+support    = ta.lowest(low, 20)
+plot(show_levels ? resistance : na, "Resistencia", color.new(color.red, 40), 1, plot.style_stepline)
+plot(show_levels ? support    : na, "Soporte",     color.new(color.green, 40), 1, plot.style_stepline)
+plot(ema9, "EMA 9", color.new(color.yellow, 40), 1)
+
+if show_labels and signal_call
+    tag = last_det_was_rev_call ? "R" : "C+"
+    lbl_text = "CALL " + tag
+    label.new(bar_index, low - rng * 0.5, lbl_text, color=color.new(color.green, 5), textcolor=color.white, style=label.style_label_up, size=size.normal)
+
+if show_labels and signal_put
+    tag = last_det_was_rev_put ? "R" : "C+"
+    lbl_text = "PUT " + tag
+    label.new(bar_index, high + rng * 0.5, lbl_text, color=color.new(color.red, 5), textcolor=color.white, style=label.style_label_down, size=size.normal)
+
+// ─── VISUAL: NIVELES S/R ─────────────────────────────────────────────
+var line   ln_hist_hi    = na
+var line   ln_hist_lo    = na
+var label  lb_hist_hi    = na
+var label  lb_hist_lo    = na
+var line[]  sr_draw_lines  = array.new_line()
+var label[] sr_draw_labels = array.new_label()
+
+if barstate.islast and show_sr
+    // Histórico High
+    line.delete(ln_hist_hi)
+    label.delete(lb_hist_hi)
+    if not na(hist_high)
+        ln_hist_hi := line.new(bar_index - 300, hist_high, bar_index + 15, hist_high, color=color.new(color.aqua, 0), width=3, style=line.style_solid)
+        lb_hist_hi := label.new(bar_index + 17, hist_high, "HH", color=color.new(color.aqua, 80), textcolor=color.aqua, style=label.style_label_left, size=size.small)
+
+    // Histórico Low
+    line.delete(ln_hist_lo)
+    label.delete(lb_hist_lo)
+    if not na(hist_low)
+        ln_hist_lo := line.new(bar_index - 300, hist_low, bar_index + 15, hist_low, color=color.new(color.aqua, 0), width=3, style=line.style_solid)
+        lb_hist_lo := label.new(bar_index + 17, hist_low, "HL", color=color.new(color.aqua, 80), textcolor=color.aqua, style=label.style_label_left, size=size.small)
+
+    // Limpiar rebotes anteriores
+    if array.size(sr_draw_lines) > 0
+        for i = 0 to array.size(sr_draw_lines) - 1
+            line.delete(array.get(sr_draw_lines, i))
+    array.clear(sr_draw_lines)
+    if array.size(sr_draw_labels) > 0
+        for i = 0 to array.size(sr_draw_labels) - 1
+            label.delete(array.get(sr_draw_labels, i))
+    array.clear(sr_draw_labels)
+
+    // Recopilar niveles candidatos (cerca del precio)
+    float[] cand_lvls = array.new_float()
+    int[]   cand_tch  = array.new_int()
+    if array.size(sr_levels) > 0
+        for i = 0 to array.size(sr_levels) - 1
+            int touches = array.get(sr_touches, i)
+            if touches >= sr_min_touches
+                float lvl = array.get(sr_levels, i)
+                if math.abs(lvl - close) <= 80.0
+                    array.push(cand_lvls, lvl)
+                    array.push(cand_tch, touches)
+
+    // Top 15 niveles más fuertes
+    int max_draw = math.min(15, array.size(cand_lvls))
+    if max_draw > 0
+        for _z = 0 to max_draw - 1
+            int best_idx = 0
+            int best_val = array.get(cand_tch, 0)
+            if array.size(cand_tch) > 1
+                for j = 1 to array.size(cand_tch) - 1
+                    if array.get(cand_tch, j) > best_val
+                        best_val := array.get(cand_tch, j)
+                        best_idx := j
+            float lvl = array.get(cand_lvls, best_idx)
+            int touches = best_val
+            int w = touches >= 4 ? 2 : 1
+            line ln = line.new(bar_index - 200, lvl, bar_index + 10, lvl, color=color.new(color.fuchsia, 30), width=w, style=line.style_dotted)
+            array.push(sr_draw_lines, ln)
+            label lb = label.new(bar_index + 12, lvl, str.tostring(touches) + "x", color=color.new(color.fuchsia, 90), textcolor=color.fuchsia, style=label.style_label_left, size=size.tiny)
+            array.push(sr_draw_labels, lb)
+            array.remove(cand_lvls, best_idx)
+            array.remove(cand_tch, best_idx)
+
+// Reset trigger window después de señal exitosa
+if signal_call
+    det_call_ago := 999
+if signal_put
+    det_put_ago := 999
+
+alertcondition(signal_call, "PA-SCANNER: CALL SPX 0DTE", '{"ticker":"SPX","signal":"CALL"}')
+alertcondition(signal_put,  "PA-SCANNER: PUT SPX 0DTE",  '{"ticker":"SPX","signal":"PUT"}')
