@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>🚨 BOT ALFA - EMERGENCIA</title>
+</head>
+
+<body style="background: #000; color: #fff; font-family: sans-serif; text-align: center; padding: 50px;">
+    <h1>MANDO DE EMERGENCIA SPX (10/10)</h1>
+    <p>Si ves esto, la conexión al puerto 8001 está OK.</p>
+    <hr>
+    <button onclick="send('BUY_CALL')"
+        style="background: green; color: white; padding: 30px; font-size: 20px; cursor: pointer;">BUY CALL
+        (SPX)</button>
+    <button onclick="send('BUY_PUT')"
+        style="background: red; color: white; padding: 30px; font-size: 20px; cursor: pointer;">BUY PUT (SPX)</button>
+
+    <script>
+        async function send(action) {
+            const ticker = "SPX";
+            const direction = (action === 'BUY_CALL') ? 'long' : 'short';
+            const useTrail = true;
+
+            alert("🚀 DISPARANDO " + action + " EN SPX (10%)...");
+
+            try {
+                const response = await fetch('/manual_trade', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ticker: ticker,
+                        direction: direction,
+                        use_trailing_stop: useTrail,
+                        tp_percent: 0.10,
+                        sl_percent: 0.10,
+                        client_timestamp: Date.now()
+                    })
+                });
+                const result = await response.json();
+                alert("✅ RESPUESTA: " + JSON.stringify(result));
+            } catch (err) {
+                alert("🚨 FALLO TOTAL: " + err.message);
+            }
+        }
+    </script>
+</body>
+
+</html>
