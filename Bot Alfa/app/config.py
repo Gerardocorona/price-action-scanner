@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     # Tickers activos para escanear (separados por coma)
     active_tickers: str = "SPY,QQQ,GOOG,AMZN,TSLA,NVDA,MSFT,AMD,IWM,DIA"
 
+    # ── SPX Real-Time Market Data Stream ──────────────────────────────────────
+    ib_stream_client_id: int = 102           # Client ID separado del trading (101)
+    spx_stream_enabled: bool = True          # Habilitar streamer de heat map
+    spx_stream_strike_range_pct: float = 0.05  # ±5% del precio SPX
+    spx_stream_recenter_threshold: float = 5.0  # Re-centrar cuando SPX se mueve >5 pts
+    spx_stream_max_subscriptions: int = 100  # Máximo de suscripciones simultáneas
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

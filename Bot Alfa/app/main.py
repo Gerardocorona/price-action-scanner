@@ -66,12 +66,17 @@ app.include_router(dashboard_router)
 from .calibrator_router import router as calibrator_router
 app.include_router(calibrator_router)
 
+# ── Live Market Data (SPX Heat Map) ───────────────────────────────────────────
+from .live_data_router import router as live_data_router
+app.include_router(live_data_router)
+
 
 from .contract_selector import setup_day_plan, restore_day_state, TICKER_PRICE_RANGES
 from .ibkr_adapter import ibkr_broker
 
 from .dca_monitor import dca_monitor
 from .consistency_checker import consistency_monitor
+from .market_data_stream import spx_stream
 
 @app.on_event("startup")
 async def startup() -> None:
@@ -106,6 +111,13 @@ async def startup() -> None:
     #   - post_session_calibrator
     # ============================================================
     
+    # ── SPX Market Data Stream (Heat Map en tiempo real) ─────────────────────
+    if settings.spx_stream_enabled:
+        logger.info("🌡️ Iniciando SPX Market Data Stream (Heat Map)...")
+        spx_stream.start()
+    else:
+        logger.info("🌡️ SPX Stream deshabilitado por configuración.")
+
     # Tarea de fondo para conectar e inicializar con RECONEXIÓN ROBUSTA
     async def _initialize_system_loop():
         retry_count = 0
@@ -191,6 +203,10 @@ async def shutdown() -> None:
     await dca_monitor.stop()
     await consistency_monitor.stop()
     await data_logger.stop()
+
+    # Detener SPX Stream
+    spx_stream.stop()
+
     await client.disconnect()
 
 

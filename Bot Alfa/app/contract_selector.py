@@ -395,18 +395,55 @@ async def on_tradingview_alert(
     #     except Exception:
     #         pass
 
-    # --- PASO 1: Obtener cadena de opciones FRESCA (directo, sin caché) ---
-    logger.info(f"[{ticker}] 📡 Obteniendo cadena de opciones FRESCA del broker...")
-    chain = await broker.get_option_chain_direct(ticker)
+    # --- PASO 1+2: Seleccionar contrato (Heat Map instantáneo o cadena tradicional) ---
+    best_option_data = None
+    heat_map_hit = False
 
-    if not chain:
-        logger.error(f"[{ticker}] ❌ No se pudo obtener la cadena de opciones.")
-        return "NO_CONTRACT_FOUND"
+    # Si es SPX y el Heat Map está listo → lookup instantáneo (0ms)
+    if ticker.upper() == "SPX":
+        try:
+            from .market_data_stream import spx_stream
+            if spx_stream.is_ready():
+                hm_entry = spx_stream.get_best_contract(direction)
+                if hm_entry and hm_entry.mid > 0:
+                    # Convertir HeatMapEntry al formato esperado por el flujo
+                    best_option_data = {
+                        "symbol": f"SPX  {hm_entry.expiry} {hm_entry.right} {hm_entry.strike:.0f}",
+                        "price": hm_entry.mid,
+                        "bid": hm_entry.bid,
+                        "ask": hm_entry.ask,
+                        "spread_pct": hm_entry.spread_pct,
+                        "strike": hm_entry.strike,
+                        "expiry": hm_entry.expiry,
+                        "con_id": hm_entry.con_id,
+                        "delta": hm_entry.delta,
+                        "score": hm_entry.score,
+                    }
+                    heat_map_hit = True
+                    logger.info(
+                        f"[{ticker}] 🌡️ HeatMap HIT (0ms) → Strike={hm_entry.strike} "
+                        f"Mid=${hm_entry.mid:.2f} Score={hm_entry.score:.4f} Δ={hm_entry.delta:.3f}"
+                    )
+        except ImportError:
+            pass  # Heat map no disponible, seguir con fallback
+        except Exception as e:
+            logger.warning(f"[{ticker}] HeatMap lookup error: {e}. Fallback a cadena.")
 
-    logger.info(f"[{ticker}] Cadena obtenida: {len(chain)} contratos disponibles.")
+    # Fallback: obtener cadena de opciones del broker (500ms)
+    if not best_option_data:
+        if heat_map_hit is False and ticker.upper() == "SPX":
+            logger.info(f"[{ticker}] 📡 HeatMap no disponible. Fallback a cadena del broker...")
+        else:
+            logger.info(f"[{ticker}] 📡 Obteniendo cadena de opciones FRESCA del broker...")
 
-    # --- PASO 2: Seleccionar el mejor contrato ---
-    best_option_data = _choose_best_option(chain, ticker=ticker, option_type=option_type)
+        chain = await broker.get_option_chain_direct(ticker)
+
+        if not chain:
+            logger.error(f"[{ticker}] ❌ No se pudo obtener la cadena de opciones.")
+            return "NO_CONTRACT_FOUND"
+
+        logger.info(f"[{ticker}] Cadena obtenida: {len(chain)} contratos disponibles.")
+        best_option_data = _choose_best_option(chain, ticker=ticker, option_type=option_type)
 
     if not best_option_data:
         logger.warning(f"[{ticker}] ❌ Ningún contrato cumple los criterios.")
