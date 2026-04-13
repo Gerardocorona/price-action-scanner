@@ -23,7 +23,7 @@ show_sr        = input.bool(true,  "Mostrar niveles S/R",          group="Nivele
 // ─── FILTRO DE TENDENCIA ─────────────────────────────────────────────
 trend_filter_on = input.bool(true,  "Solo operar a favor de micro-tendencia", group="Filtros")
 trend_ema_len   = input.int(9,      "EMA para micro-tendencia",               minval=5, maxval=30, group="Filtros")
-trend_slope_bars = input.int(3,     "Barras para pendiente EMA",              minval=2, maxval=10, group="Filtros")
+trend_slope_bars = input.int(2,     "Barras para pendiente EMA",              minval=1, maxval=5, group="Filtros")
 
 in_session = not na(time(timeframe.period, "0930-1600", "America/New_York"))
 
