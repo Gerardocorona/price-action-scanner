@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-04-13T17:40:31.868048",
+  "backtest": {
+    "symbol": "CBOE:SPX",
+    "timeframe": "2min",
+    "total_trades": 2278,
+    "win_rate": 0.421,
+    "net_pnl": 205.62,
+    "max_drawdown": 154.81,
+    "profit_factor": 1.055,
+    "expectancy": 0.0903,
+    "avg_win": 4.25,
+    "avg_loss": 2.93
+  },
+  "monte_carlo": {
+    "simulations": 10000,
+    "trades_per_sim": 2278,
+    "pnl_mean": 646.22,
+    "pnl_std": 167.93,
+    "pnl_median": 645.04,
+    "prob_profitable": 100.0,
+    "prob_above_100": 99.9,
+    "prob_above_200": 99.7,
+    "max_dd_mean": 84.13,
+    "max_dd_p95": 131.42,
+    "max_dd_p99": 162.95,
+    "ci_95": [
+      319.18,
+      980.07
+    ],
+    "sharpe": 3.848,
+    "calmar": 7.681,
+    "sortino": 0.0,
+    "avg_losing_streak": 13.1,
+    "p95_losing_streak": 18
+  }
+}
