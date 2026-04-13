@@ -20,6 +20,11 @@ sr_proximity   = input.float(3.0,  "Distancia inhibición (pts)",   minval=0.5, 
 sr_min_touches = input.int(1,      "Toques mínimos para nivel",    minval=1, maxval=10, group="Niveles S/R")
 show_sr        = input.bool(true,  "Mostrar niveles S/R",          group="Niveles S/R")
 
+// ─── FILTRO DE TENDENCIA ─────────────────────────────────────────────
+trend_filter_on = input.bool(true,  "Solo operar a favor de micro-tendencia", group="Filtros")
+trend_ema_len   = input.int(9,      "EMA para micro-tendencia",               minval=5, maxval=30, group="Filtros")
+trend_slope_bars = input.int(3,     "Barras para pendiente EMA",              minval=2, maxval=10, group="Filtros")
+
 in_session = not na(time(timeframe.period, "0930-1600", "America/New_York"))
 
 // ─── DATA MULTI-TIMEFRAME ────────────────────────────────────────────
@@ -225,9 +230,21 @@ if array.size(sr_levels) > 0
                 if dist > 0 and close < close[1]  // precio encima del nivel, bajando → acercándose a soporte
                     approaching_support := true
 
-// ─── SEÑALES FINALES (con filtro S/R direccional) ────────────────────
-signal_call = trigger_call and bars_since_call >= cooldown_bars and not approaching_resistance
-signal_put  = trigger_put  and bars_since_put  >= cooldown_bars and not approaching_support
+// ─── FIX D: GATE MICRO-TENDENCIA ────────────────────────────────────
+// Solo operar A FAVOR de la tendencia, nunca en contra.
+// Micro-tendencia UP = EMA subiendo + precio encima → solo CALL
+// Micro-tendencia DOWN = EMA bajando + precio debajo → solo PUT
+ema_trend = ta.ema(close, trend_ema_len)
+bool ema_rising  = ema_trend > ema_trend[trend_slope_bars]
+bool ema_falling = ema_trend < ema_trend[trend_slope_bars]
+bool micro_trend_up   = ema_rising  and close > ema_trend
+bool micro_trend_down = ema_falling and close < ema_trend
+bool trend_ok_call = trend_filter_on ? micro_trend_up   : true
+bool trend_ok_put  = trend_filter_on ? micro_trend_down : true
+
+// ─── SEÑALES FINALES (con filtro S/R direccional + micro-tendencia) ──
+signal_call = trigger_call and bars_since_call >= cooldown_bars and not approaching_resistance and trend_ok_call
+signal_put  = trigger_put  and bars_since_put  >= cooldown_bars and not approaching_support    and trend_ok_put
 
 bars_since_call := signal_call ? 0 : bars_since_call + 1
 bars_since_put  := signal_put  ? 0 : bars_since_put  + 1
