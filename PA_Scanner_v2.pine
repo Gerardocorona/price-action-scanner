@@ -230,17 +230,42 @@ if array.size(sr_levels) > 0
                 if dist > 0 and close < close[1]  // precio encima del nivel, bajando → acercándose a soporte
                     approaching_support := true
 
-// ─── FIX D: GATE MICRO-TENDENCIA ────────────────────────────────────
+// ─── FIX D: GATE MICRO-TENDENCIA PRICE ACTION ──────────────────────
 // Solo operar A FAVOR de la tendencia, nunca en contra.
-// Micro-tendencia UP = EMA subiendo + precio encima → solo CALL
-// Micro-tendencia DOWN = EMA bajando + precio debajo → solo PUT
-ema_trend = ta.ema(close, trend_ema_len)
-bool ema_rising  = ema_trend > ema_trend[trend_slope_bars]
-bool ema_falling = ema_trend < ema_trend[trend_slope_bars]
-bool micro_trend_up   = ema_rising  and close > ema_trend
-bool micro_trend_down = ema_falling and close < ema_trend
-bool trend_ok_call = trend_filter_on ? micro_trend_up   : true
-bool trend_ok_put  = trend_filter_on ? micro_trend_down : true
+// UPTREND   = Higher High AND Higher Low (máx alto, mín alto)
+// DOWNTREND = Lower High AND Lower Low   (máx bajo, mín bajo)
+var float last_swing_high = high[1]
+var float last_swing_low  = low[1]
+
+bool higher_high = high > last_swing_high
+bool higher_low  = low > last_swing_low
+bool lower_high  = high < last_swing_high
+bool lower_low   = low < last_swing_low
+
+bool uptrend_confirmed   = higher_high and higher_low
+bool downtrend_confirmed = lower_high and lower_low
+
+var bool was_uptrend = true
+var bool was_downtrend = false
+
+if uptrend_confirmed
+    was_uptrend := true
+    was_downtrend := false
+    last_swing_high := high
+    last_swing_low := low
+
+if downtrend_confirmed
+    was_uptrend := false
+    was_downtrend := true
+    last_swing_high := high
+    last_swing_low := low
+
+bool trend_ok_call = trend_filter_on ? uptrend_confirmed or was_uptrend : true
+bool trend_ok_put  = trend_filter_on ? downtrend_confirmed or was_downtrend : true
+
+// Visualización de tendencia confirmada
+plot(uptrend_confirmed ? high * 1.0005 : na, "Uptrend Confirmed", color.new(color.green, 70), 3)
+plot(downtrend_confirmed ? low * 0.9995 : na, "Downtrend Confirmed", color.new(color.red, 70), 3)
 
 // ─── SEÑALES FINALES (con filtro S/R direccional + micro-tendencia) ──
 signal_call = trigger_call and bars_since_call >= cooldown_bars and not approaching_resistance and trend_ok_call
