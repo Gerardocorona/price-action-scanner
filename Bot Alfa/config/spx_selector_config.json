@@ -135,10 +135,145 @@
                 },
                 "promoted": false,
                 "improvement_pct": 0.0
+            },
+            {
+                "date": "2026-04-13T06:38:37.980049",
+                "window_trades": 10,
+                "champion_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.910682300482007
+                },
+                "challenger_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.9135487434631155
+                },
+                "challenger_params": {
+                    "price_min": 2.5,
+                    "price_max": 7.5,
+                    "sweet_spot": 5.0,
+                    "max_spread_pct": 0.11,
+                    "w_price": 0.5,
+                    "w_spread": 0.3,
+                    "w_moneyness": 0.2
+                },
+                "promoted": false,
+                "improvement_pct": 0.0
+            },
+            {
+                "date": "2026-04-13T10:47:50.884660",
+                "window_trades": 10,
+                "champion_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.910682300482007
+                },
+                "challenger_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.9135487434631155
+                },
+                "challenger_params": {
+                    "price_min": 2.5,
+                    "price_max": 7.5,
+                    "sweet_spot": 5.0,
+                    "max_spread_pct": 0.11,
+                    "w_price": 0.5,
+                    "w_spread": 0.3,
+                    "w_moneyness": 0.2
+                },
+                "promoted": false,
+                "improvement_pct": 0.0
+            },
+            {
+                "date": "2026-04-13T10:58:42.868280",
+                "window_trades": 10,
+                "champion_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.910682300482007
+                },
+                "challenger_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.8956823004820069
+                },
+                "challenger_params": {
+                    "price_min": 2.5,
+                    "price_max": 7.5,
+                    "sweet_spot": 4.75,
+                    "max_spread_pct": 0.1,
+                    "w_price": 0.5,
+                    "w_spread": 0.3,
+                    "w_moneyness": 0.2
+                },
+                "promoted": false,
+                "improvement_pct": 0.0
+            },
+            {
+                "date": "2026-04-13T11:12:43.938845",
+                "window_trades": 10,
+                "champion_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.910682300482007
+                },
+                "challenger_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.9146823004820069
+                },
+                "challenger_params": {
+                    "price_min": 2.5,
+                    "price_max": 7.5,
+                    "sweet_spot": 5.25,
+                    "max_spread_pct": 0.1,
+                    "w_price": 0.5,
+                    "w_spread": 0.3,
+                    "w_moneyness": 0.2
+                },
+                "promoted": false,
+                "improvement_pct": 0.0
+            },
+            {
+                "date": "2026-04-13T11:14:10.485415",
+                "window_trades": 10,
+                "champion_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.910682300482007
+                },
+                "challenger_metrics": {
+                    "avg_return_pct": 0.06255156608097782,
+                    "win_rate": 0.8,
+                    "selected_count": 10,
+                    "avg_score": 0.9115338988576734
+                },
+                "challenger_params": {
+                    "price_min": 2.5,
+                    "price_max": 7.5,
+                    "sweet_spot": 5.0,
+                    "max_spread_pct": 0.1,
+                    "w_price": 0.5,
+                    "w_spread": 0.3,
+                    "w_moneyness": 0.25
+                },
+                "promoted": false,
+                "improvement_pct": 0.0
             }
         ],
         "total_promotions": 0,
-        "total_battles": 3,
-        "last_battle_date": "2026-04-10T14:26:46.525613"
+        "total_battles": 8,
+        "last_battle_date": "2026-04-13T11:14:10.485415"
     }
 }

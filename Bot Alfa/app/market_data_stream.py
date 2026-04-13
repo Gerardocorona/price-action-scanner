@@ -314,7 +314,11 @@ class SPXMarketDataStream:
 
     async def _initialize_subscriptions(self):
         """Detecta expiración 0DTE, obtiene precio SPX, suscribe contratos."""
-        # 1. Suscribir al underlying SPX para precio en tiempo real
+        # Solicitar delayed data si no hay suscripción real-time (Error 354/10090)
+        # Type 3 = delayed, Type 4 = delayed-frozen (fuera de horario)
+        self._ib.reqMarketDataType(3)
+
+        # 1. Suscribir al underlying SPX para precio en tiempo real (o delayed)
         spx = Index("SPX", "CBOE")
         qualified = await self._ib.qualifyContractsAsync(spx)
         if not qualified:

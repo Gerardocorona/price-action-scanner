@@ -30,11 +30,14 @@ class OrderIdManager:
 
     def get_next_id(self, ib_req_id: int) -> int:
         """
-        Retorna el ID más alto entre el persistido y el sugerido por IBKR.
+        Retorna el ID más alto entre el persistido y el sugerido por IBKR, con buffer de seguridad.
+        Usa un buffer +100 para evitar colisiones con órdenes previas.
         """
-        next_id = max(self._last_id, ib_req_id) + 1
+        # Usar el máximo y sumar buffer para garantizar IDs frescos y sin colisiones
+        next_id = max(self._last_id, ib_req_id + 100) + 1
         self._last_id = next_id
         self._save(next_id)
+        logger.info(f"Generated next Order ID: {next_id} (from persistent={self._last_id}, ib_req={ib_req_id})")
         return next_id
 
 # Instancia global

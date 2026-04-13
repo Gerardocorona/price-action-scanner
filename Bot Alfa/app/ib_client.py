@@ -776,9 +776,15 @@ class IBClient:
             from ib_insync import Option, LimitOrder, StopOrder, Order, PriceCondition
             import uuid
 
-            # 1. Crear contrato de opción
-            contract = Option(localSymbol=option_symbol, exchange="SMART", currency="USD")
-            await self._bridge.ib.qualifyContractsAsync(contract)
+            # 1. Crear contrato de opción (soporta conId directo del Heat Map)
+            if option_symbol.startswith("CONID:"):
+                con_id = int(option_symbol.split(":")[1])
+                from ib_insync import Contract
+                contract = Contract(conId=con_id, exchange="SMART")
+                await self._bridge.ib.qualifyContractsAsync(contract)
+            else:
+                contract = Option(localSymbol=option_symbol, exchange="SMART", currency="USD")
+                await self._bridge.ib.qualifyContractsAsync(contract)
 
             # 2. Obtener IDs válidos
             base_id = id_manager.get_next_id(self._bridge.ib.client.getReqId())
@@ -795,7 +801,7 @@ class IBClient:
                 cond = PriceCondition(
                     price=tp_price,
                     conId=contract.conId,
-                    exchange="SMART",
+                    exch="SMART",
                     isMore=True
                 )
                 tp = Order(

@@ -407,8 +407,9 @@ async def on_tradingview_alert(
                 hm_entry = spx_stream.get_best_contract(direction)
                 if hm_entry and hm_entry.mid > 0:
                     # Convertir HeatMapEntry al formato esperado por el flujo
+                    # Usar conId como símbolo — place_bracket_order_complete detecta el prefijo
                     best_option_data = {
-                        "symbol": f"SPX  {hm_entry.expiry} {hm_entry.right} {hm_entry.strike:.0f}",
+                        "symbol": f"CONID:{hm_entry.con_id}",
                         "price": hm_entry.mid,
                         "bid": hm_entry.bid,
                         "ask": hm_entry.ask,
@@ -455,8 +456,15 @@ async def on_tradingview_alert(
     selected_expiry = best_option_data.get("expiry") # Viene de la cadena si se incluyó
 
     # --- PASO 3: Obtener precio REAL en vivo para la orden ---
-    logger.info(f"[{ticker}] 💰 Obteniendo cotización en vivo de {option_symbol}...")
-    entry_price, bid, ask = await _get_live_price(broker, option_symbol)
+    if heat_map_hit and best_option_data.get("bid", 0) > 0:
+        # Heat Map ya tiene precios streaming en tiempo real — no re-consultar
+        bid = best_option_data["bid"]
+        ask = best_option_data["ask"]
+        entry_price = ask if ask > 0 else best_option_data["price"]
+        logger.info(f"[{ticker}] 💰 Usando precios del HeatMap: bid=${bid:.2f} ask=${ask:.2f}")
+    else:
+        logger.info(f"[{ticker}] 💰 Obteniendo cotización en vivo de {option_symbol}...")
+        entry_price, bid, ask = await _get_live_price(broker, option_symbol)
 
     if entry_price <= 0:
         logger.error(f"[{ticker}] ❌ No se pudo obtener precio válido para {option_symbol}.")
