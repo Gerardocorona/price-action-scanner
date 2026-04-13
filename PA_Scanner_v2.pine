@@ -20,10 +20,8 @@ sr_proximity   = input.float(3.0,  "Distancia inhibición (pts)",   minval=0.5, 
 sr_min_touches = input.int(1,      "Toques mínimos para nivel",    minval=1, maxval=10, group="Niveles S/R")
 show_sr        = input.bool(true,  "Mostrar niveles S/R",          group="Niveles S/R")
 
-// ─── FILTRO DE TENDENCIA ─────────────────────────────────────────────
-trend_filter_on = input.bool(true,  "Solo operar a favor de micro-tendencia", group="Filtros")
-trend_ema_len   = input.int(9,      "EMA para micro-tendencia",               minval=5, maxval=30, group="Filtros")
-trend_slope_bars = input.int(2,     "Barras para pendiente EMA",              minval=1, maxval=5, group="Filtros")
+// ─── FILTRO DE TENDENCIA (SWING PIVOTS) ──────────────────────────────
+trend_filter_on = input.bool(true,  "Solo operar a favor de tendencia (swing pivots)", group="Filtros")
 
 in_session = not na(time(timeframe.period, "0930-1600", "America/New_York"))
 
@@ -230,42 +228,52 @@ if array.size(sr_levels) > 0
                 if dist > 0 and close < close[1]  // precio encima del nivel, bajando → acercándose a soporte
                     approaching_support := true
 
-// ─── FIX D: GATE MICRO-TENDENCIA PRICE ACTION ──────────────────────
+// ─── FIX D: GATE MICRO-TENDENCIA PRICE ACTION (SWING PIVOTS) ────────
 // Solo operar A FAVOR de la tendencia, nunca en contra.
-// UPTREND   = Higher High AND Higher Low (máx alto, mín alto)
-// DOWNTREND = Lower High AND Lower Low   (máx bajo, mín bajo)
-var float last_swing_high = high[1]
-var float last_swing_low  = low[1]
+// Usa SWING POINTS (pivots) en lugar de comparación bar-a-bar.
+// Swing High = barra cuyo high > high de 2 barras previas Y > high de 1 barra siguiente
+// Swing Low  = barra cuyo low  < low  de 2 barras previas Y < low  de 1 barra siguiente
+// UPTREND   = Swing High sube AND Swing Low sube
+// DOWNTREND = Swing High baja AND Swing Low baja
+float ph = ta.pivothigh(high, 2, 1)
+float pl = ta.pivotlow(low, 2, 1)
 
-bool higher_high = high > last_swing_high
-bool higher_low  = low > last_swing_low
-bool lower_high  = high < last_swing_high
-bool lower_low   = low < last_swing_low
+var float prev_swing_high = na
+var float curr_swing_high = na
+var float prev_swing_low  = na
+var float curr_swing_low  = na
 
-bool uptrend_confirmed   = higher_high and higher_low
-bool downtrend_confirmed = lower_high and lower_low
+if not na(ph)
+    prev_swing_high := curr_swing_high
+    curr_swing_high := ph
+
+if not na(pl)
+    prev_swing_low := curr_swing_low
+    curr_swing_low := pl
+
+bool has_both_swings = not na(prev_swing_high) and not na(curr_swing_high) and not na(prev_swing_low) and not na(curr_swing_low)
+bool swing_uptrend   = has_both_swings and curr_swing_high > prev_swing_high and curr_swing_low > prev_swing_low
+bool swing_downtrend = has_both_swings and curr_swing_high < prev_swing_high and curr_swing_low < prev_swing_low
 
 var bool was_uptrend = true
 var bool was_downtrend = false
 
-if uptrend_confirmed
+if swing_uptrend
     was_uptrend := true
     was_downtrend := false
-    last_swing_high := high
-    last_swing_low := low
 
-if downtrend_confirmed
+if swing_downtrend
     was_uptrend := false
     was_downtrend := true
-    last_swing_high := high
-    last_swing_low := low
 
-bool trend_ok_call = trend_filter_on ? uptrend_confirmed or was_uptrend : true
-bool trend_ok_put  = trend_filter_on ? downtrend_confirmed or was_downtrend : true
+bool trend_ok_call = trend_filter_on ? swing_uptrend or was_uptrend : true
+bool trend_ok_put  = trend_filter_on ? swing_downtrend or was_downtrend : true
 
-// Visualización de tendencia confirmada
-plot(uptrend_confirmed ? high * 1.0005 : na, "Uptrend Confirmed", color.new(color.green, 70), 3)
-plot(downtrend_confirmed ? low * 0.9995 : na, "Downtrend Confirmed", color.new(color.red, 70), 3)
+// Visualización de tendencia y swing points
+plot(swing_uptrend ? high * 1.0005 : na, "Uptrend Confirmed", color.new(color.green, 70), 3)
+plot(swing_downtrend ? low * 0.9995 : na, "Downtrend Confirmed", color.new(color.red, 70), 3)
+plot(not na(ph) ? ph : na, "Swing High", color.new(color.aqua, 50), 2, plot.style_circles)
+plot(not na(pl) ? pl : na, "Swing Low", color.new(color.orange, 50), 2, plot.style_circles)
 
 // ─── SEÑALES FINALES (con filtro S/R direccional + micro-tendencia) ──
 signal_call = trigger_call and bars_since_call >= cooldown_bars and not approaching_resistance and trend_ok_call
