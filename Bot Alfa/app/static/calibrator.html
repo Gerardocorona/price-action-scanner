@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bot Alfa — Diario de Sesión</title>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0d1117;
+      --bg2:         #161b22;
+      --bg3:         #1c2128;
+      --border:      #30363d;
+      --text:        #e6edf3;
+      --text-muted:  #8b949e;
+      --green:       #3fb950;
+      --green-dim:   #1a3a22;
+      --red:         #f85149;
+      --red-dim:     #3a1a1a;
+      --yellow:      #d29922;
+      --yellow-dim:  #3a2e10;
+      --blue:        #58a6ff;
+      --blue-dim:    #1a2a3a;
+      --purple:      #bc8cff;
+      --radius:      8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    .header {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-logo { font-size: 20px; }
+    .header-title { font-size: 18px; font-weight: 600; }
+    .header-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    }
+    .badge-green  { background: var(--green-dim);  color: var(--green); }
+    .badge-red    { background: var(--red-dim);    color: var(--red); }
+    .badge-yellow { background: var(--yellow-dim); color: var(--yellow); }
+    .badge-blue   { background: var(--blue-dim);   color: var(--blue); }
+    .badge-muted  { background: var(--bg3);        color: var(--text-muted); }
+
+    /* ── Layout ───────────────────────────────────────────────── */
+    .main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+    /* ── Stats Bar ────────────────────────────────────────────── */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      text-align: center;
+    }
+    .stat-value { font-size: 24px; font-weight: 700; line-height: 1; }
+    .stat-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-green { color: var(--green); }
+    .stat-red   { color: var(--red); }
+    .stat-blue  { color: var(--blue); }
+    .stat-yellow{ color: var(--yellow); }
+
+    /* ── Insights Panel ───────────────────────────────────────── */
+    .insights-panel {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      display: none;
+    }
+    .insights-panel.visible { display: block; }
+    .insights-title { font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .suggestion {
+      background: var(--bg3);
+      border-left: 3px solid var(--yellow);
+      border-radius: 4px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .suggestion.high   { border-color: var(--red); }
+    .suggestion.medium { border-color: var(--yellow); }
+    .suggestion.low    { border-color: var(--blue); }
+
+    /* ── Toolbar ──────────────────────────────────────────────── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .toolbar-left { display: flex; align-items: center; gap: 10px; }
+    .filter-btn {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover, .filter-btn.active {
+      background: var(--bg3);
+      color: var(--text);
+      border-color: var(--blue);
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-success { background: var(--green); color: #fff; }
+    .btn-success:hover { opacity: 0.85; }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .btn-ghost:hover { border-color: var(--blue); color: var(--text); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Signal Cards ─────────────────────────────────────────── */
+    .signals-list { display: flex; flex-direction: column; gap: 10px; }
+
+    .signal-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .signal-card:hover { border-color: #444c56; }
+    .signal-card.labeled-correct { border-left: 3px solid var(--green); }
+    .signal-card.labeled-wrong   { border-left: 3px solid var(--red); }
+    .signal-card.labeled-missed  { border-left: 3px solid var(--yellow); }
+
+    .signal-header {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .signal-header:hover { background: var(--bg3); }
+
+    .signal-time { font-size: 13px; color: var(--text-muted); min-width: 70px; font-family: monospace; }
+    .signal-type-badge { min-width: 90px; text-align: center; }
+    .signal-strategy { font-size: 12px; color: var(--text-muted); flex: 1; }
+    .signal-direction {
+      font-weight: 700; font-size: 13px;
+      padding: 2px 10px; border-radius: 4px;
+    }
+    .dir-call { background: rgba(63,185,80,0.15); color: var(--green); }
+    .dir-put  { background: rgba(248,81,73,0.15);  color: var(--red); }
+
+    .signal-pnl { font-weight: 700; font-size: 14px; min-width: 70px; text-align: right; }
+    .pnl-pos { color: var(--green); }
+    .pnl-neg { color: var(--red); }
+    .pnl-neutral { color: var(--text-muted); }
+
+    .signal-verdict { min-width: 90px; text-align: right; }
+    .chevron { color: var(--text-muted); transition: transform 0.2s; font-size: 12px; }
+    .signal-card.expanded .chevron { transform: rotate(180deg); }
+
+    /* ── Signal Detail (expanded) ─────────────────────────────── */
+    .signal-detail {
+      display: none;
+      padding: 0 16px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .signal-card.expanded .signal-detail { display: block; }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+      margin: 14px 0;
+    }
+    .detail-item { background: var(--bg3); border-radius: 6px; padding: 10px 12px; }
+    .detail-key   { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+    .detail-value { font-size: 14px; font-weight: 600; margin-top: 2px; }
+
+    /* ── Label Panel ──────────────────────────────────────────── */
+    .label-panel { margin-top: 14px; }
+    .label-title { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+
+    .verdict-buttons { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .verdict-btn {
+      flex: 1; min-width: 120px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: 2px solid var(--border);
+      background: var(--bg3);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      transition: all 0.15s;
+    }
+    .verdict-btn:hover { border-color: #444c56; color: var(--text); }
+    .verdict-btn.selected-correct { border-color: var(--green); background: var(--green-dim); color: var(--green); }
+    .verdict-btn.selected-wrong   { border-color: var(--red);   background: var(--red-dim);   color: var(--red); }
+    .verdict-btn.selected-missed  { border-color: var(--yellow);background: var(--yellow-dim);color: var(--yellow); }
+
+    .factors-section { margin-bottom: 12px; }
+    .factors-title { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+    .factors-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+    .factor-chip {
+      padding: 4px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+    .factor-chip:hover { border-color: var(--yellow); color: var(--text); }
+    .factor-chip.selected { border-color: var(--yellow); background: var(--yellow-dim); color: var(--yellow); }
+
+    .notes-input {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 12px;
+      font-size: 13px;
+      resize: vertical;
+      min-height: 60px;
+      margin-bottom: 10px;
+      font-family: inherit;
+    }
+    .notes-input:focus { outline: none; border-color: var(--blue); }
+    .notes-input::placeholder { color: var(--text-muted); }
+
+    .save-btn {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      background: var(--blue);
+      color: #fff;
+    }
+    .save-btn:hover { opacity: 0.85; }
+    .save-btn.saved { background: var(--green); }
+    .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Empty State ──────────────────────────────────────────── */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+    .empty-icon { font-size: 48px; margin-bottom: 16px; }
+    .empty-title { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .empty-desc  { font-size: 14px; line-height: 1.6; }
+
+    /* ── Loading ──────────────────────────────────────────────── */
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-muted);
+    }
+    .spinner {
+      display: inline-block;
+      width: 24px; height: 24px;
+      border: 3px solid var(--border);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Date Selector ────────────────────────────────────────── */
+    .date-input {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .date-input:focus { outline: none; border-color: var(--blue); }
+
+    /* ── Progress Bar ─────────────────────────────────────────── */
+    .progress-bar-wrap {
+      background: var(--bg3);
+      border-radius: 4px;
+      height: 6px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--blue);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+
+    /* ── Toast ────────────────────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      transform: translateY(80px);
+      opacity: 0;
+      transition: all 0.3s ease;
+      z-index: 999;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { border-color: var(--green); color: var(--green); }
+    .toast.error   { border-color: var(--red);   color: var(--red); }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <span class="header-logo">📋</span>
+    <div>
+      <div class="header-title">Diario de Sesión</div>
+      <div class="header-subtitle">Calibrador Post-Sesión SPX v1.0</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span id="market-badge" class="badge badge-muted">Cargando...</span>
+    <input type="date" id="date-picker" class="date-input" />
+    <a href="/dashboard" style="text-decoration:none;">
+      <button class="btn btn-ghost">← Dashboard</button>
+    </a>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- STATS BAR -->
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-card">
+      <div class="stat-value stat-blue" id="stat-total">—</div>
+      <div class="stat-label">Señales Totales</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-executed">—</div>
+      <div class="stat-label">Ejecutadas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value stat-green" id="stat-winners">—</div>
+      <div class="stat-label">Ganadoras</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value stat-red" id="stat-losers">—</div>
+      <div class="stat-label">Perdedoras</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-winrate">—</div>
+      <div class="stat-label">Win Rate</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-pnl">—</div>
+      <div class="stat-label">PnL Total %</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value stat-yellow" id="stat-unlabeled">—</div>
+      <div class="stat-label">Sin Etiquetar</div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="label-progress" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- INSIGHTS PANEL -->
+  <div class="insights-panel" id="insights-panel">
+    <div class="insights-title">🧠 Insights del Calibrador</div>
+    <div id="insights-content"></div>
+  </div>
+
+  <!-- TOOLBAR -->
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <button class="filter-btn active" data-filter="all">Todas</button>
+      <button class="filter-btn" data-filter="EXECUTED">Ejecutadas</button>
+      <button class="filter-btn" data-filter="REJECTED">Rechazadas</button>
+      <button class="filter-btn" data-filter="unlabeled">Sin etiquetar</button>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-ghost" id="btn-flush" title="Forzar guardado del buffer">
+        💾 Guardar buffer
+      </button>
+      <button class="btn btn-success" id="btn-save-all" disabled>
+        ✅ Guardar todo
+      </button>
+    </div>
+  </div>
+
+  <!-- SIGNALS LIST -->
+  <div id="signals-container">
+    <div class="loading">
+      <div class="spinner"></div>
+      <div>Cargando señales del día...</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── Estado global ────────────────────────────────────────────────────────
+let allSignals = [];
+let pendingLabels = {};   // { signal_id: { verdict, factors, notes } }
+let activeFilter = 'all';
+let currentDate = new Date().toISOString().split('T')[0];
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const picker = document.getElementById('date-picker');
+  picker.value = currentDate;
+  picker.addEventListener('change', (e) => {
+    currentDate = e.target.value;
+    loadDiary(currentDate);
+  });
+
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeFilter = btn.dataset.filter;
+      renderSignals();
+    });
+  });
+
+  document.getElementById('btn-flush').addEventListener('click', forceFlush);
+  document.getElementById('btn-save-all').addEventListener('click', saveAllLabels);
+
+  loadDiary(currentDate);
+  setInterval(() => loadDiary(currentDate, true), 60000); // Auto-refresh cada minuto
+});
+
+// ─── Carga del diario ─────────────────────────────────────────────────────
+async function loadDiary(date, silent = false) {
+  if (!silent) {
+    document.getElementById('signals-container').innerHTML =
+      '<div class="loading"><div class="spinner"></div><div>Cargando señales...</div></div>';
+  }
+
+  try {
+    const url = date === new Date().toISOString().split('T')[0]
+      ? '/calibrator/diary'
+      : `/calibrator/diary/${date}`;
+
+    const res = await fetch(url);
+    const data = await res.json();
+
+    allSignals = data.signals || [];
+    updateStats(data.stats || {});
+    updateMarketBadge(data.market_status, data.current_time);
+    updateInsights(data.calibration_insights);
+    renderSignals();
+  } catch (e) {
+    document.getElementById('signals-container').innerHTML =
+      `<div class="empty-state">
+        <div class="empty-icon">⚠️</div>
+        <div class="empty-title">Error cargando datos</div>
+        <div class="empty-desc">${e.message}</div>
+      </div>`;
+  }
+}
+
+// ─── Actualizar stats ─────────────────────────────────────────────────────
+function updateStats(stats) {
+  document.getElementById('stat-total').textContent     = stats.total_signals ?? '—';
+  document.getElementById('stat-executed').textContent  = stats.executed ?? '—';
+  document.getElementById('stat-winners').textContent   = stats.winners ?? '—';
+  document.getElementById('stat-losers').textContent    = (stats.executed - stats.winners) || '—';
+  document.getElementById('stat-winrate').textContent   = stats.win_rate ? `${stats.win_rate}%` : '—';
+
+  const pnl = stats.total_pnl_pct;
+  const pnlEl = document.getElementById('stat-pnl');
+  pnlEl.textContent = pnl ? `${pnl > 0 ? '+' : ''}${pnl}%` : '—';
+  pnlEl.className = `stat-value ${pnl > 0 ? 'stat-green' : pnl < 0 ? 'stat-red' : ''}`;
+
+  document.getElementById('stat-unlabeled').textContent = stats.unlabeled ?? '—';
+
+  const pct = stats.labeling_pct || 0;
+  document.getElementById('label-progress').style.width = `${pct}%`;
+
+  // Habilitar "Guardar todo" si hay etiquetas pendientes
+  document.getElementById('btn-save-all').disabled = Object.keys(pendingLabels).length === 0;
+}
+
+function updateMarketBadge(status, time) {
+  const el = document.getElementById('market-badge');
+  if (status === 'OPEN') {
+    el.className = 'badge badge-green';
+    el.textContent = `🟢 Mercado Abierto ${time || ''}`;
+  } else if (status === 'CLOSED') {
+    el.className = 'badge badge-red';
+    el.textContent = `🔴 Mercado Cerrado ${time || ''}`;
+  } else {
+    el.className = 'badge badge-yellow';
+    el.textContent = `🟡 Pre-Market ${time || ''}`;
+  }
+}
+
+function updateInsights(insights) {
+  const panel = document.getElementById('insights-panel');
+  const content = document.getElementById('insights-content');
+
+  if (!insights || insights.status === 'INSUFFICIENT_DATA') {
+    panel.classList.remove('visible');
+    return;
+  }
+
+  panel.classList.add('visible');
+  const suggestions = insights.suggestions || [];
+  if (suggestions.length === 0) {
+    content.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Sin sugerencias por ahora. Continúa etiquetando.</div>';
+    return;
+  }
+
+  content.innerHTML = suggestions.map(s =>
+    `<div class="suggestion ${s.priority.toLowerCase()}">
+      <strong>${s.type === 'TIGHTEN_FILTER' ? '🔒 Filtros más estrictos' :
+                s.type === 'RELAX_FILTER'   ? '🔓 Relajar filtros' :
+                '💡 Insight'}:</strong> ${s.message}
+    </div>`
+  ).join('');
+}
+
+// ─── Renderizar señales ───────────────────────────────────────────────────
+function renderSignals() {
+  const container = document.getElementById('signals-container');
+
+  let filtered = allSignals;
+  if (activeFilter === 'EXECUTED') filtered = allSignals.filter(s => s.signal_type === 'EXECUTED');
+  else if (activeFilter === 'REJECTED') filtered = allSignals.filter(s => s.signal_type === 'REJECTED');
+  else if (activeFilter === 'unlabeled') filtered = allSignals.filter(s => !s.verdict && !pendingLabels[s.id]);
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">${activeFilter === 'unlabeled' ? '🎉' : '📭'}</div>
+        <div class="empty-title">${activeFilter === 'unlabeled' ? '¡Todo etiquetado!' : 'Sin señales'}</div>
+        <div class="empty-desc">${activeFilter === 'unlabeled'
+          ? 'Has etiquetado todas las señales del día. ¡Excelente trabajo!'
+          : 'No hay señales para mostrar con el filtro seleccionado.'}</div>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = `<div class="signals-list">${filtered.map(renderSignalCard).join('')}</div>`;
+
+  // Attach event listeners
+  container.querySelectorAll('.signal-header').forEach(h => {
+    h.addEventListener('click', () => toggleCard(h.closest('.signal-card')));
+  });
+  container.querySelectorAll('.verdict-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectVerdict(btn);
+    });
+  });
+  container.querySelectorAll('.factor-chip').forEach(chip => {
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      chip.classList.toggle('selected');
+      markPending(chip.closest('.signal-card'));
+    });
+  });
+  container.querySelectorAll('.notes-input').forEach(input => {
+    input.addEventListener('input', (e) => {
+      e.stopPropagation();
+      markPending(input.closest('.signal-card'));
+    });
+  });
+  container.querySelectorAll('.save-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      saveSingleLabel(btn.closest('.signal-card'));
+    });
+  });
+}
+
+function renderSignalCard(signal) {
+  const pending = pendingLabels[signal.id];
+  const verdict = pending?.verdict || signal.verdict;
+  const labelClass = verdict === 'CORRECT' ? 'labeled-correct'
+                   : verdict === 'WRONG'   ? 'labeled-wrong'
+                   : verdict === 'MISSED'  ? 'labeled-missed' : '';
+
+  const typeClass = signal.signal_type === 'EXECUTED' ? 'badge-blue'
+                  : signal.signal_type === 'REJECTED' ? 'badge-muted' : 'badge-yellow';
+  const typeLabel = signal.signal_type === 'EXECUTED' ? '▶ Ejecutada'
+                  : signal.signal_type === 'REJECTED' ? '✗ Rechazada' : '+ Perdida';
+
+  const dirClass = signal.direction === 'CALL' ? 'dir-call' : 'dir-put';
+
+  let pnlHtml = '<span class="signal-pnl pnl-neutral">—</span>';
+  if (signal.pnl_pct !== null && signal.pnl_pct !== undefined) {
+    const cls = signal.pnl_pct > 0 ? 'pnl-pos' : 'pnl-neg';
+    const sign = signal.pnl_pct > 0 ? '+' : '';
+    pnlHtml = `<span class="signal-pnl ${cls}">${sign}${signal.pnl_pct.toFixed(1)}%</span>`;
+  }
+
+  let verdictBadge = '<span class="badge badge-muted">Sin etiquetar</span>';
+  if (verdict === 'CORRECT') verdictBadge = '<span class="badge badge-green">✅ Correcto</span>';
+  else if (verdict === 'WRONG') verdictBadge = '<span class="badge badge-red">❌ Incorrecto</span>';
+  else if (verdict === 'MISSED') verdictBadge = '<span class="badge badge-yellow">➕ Perdida</span>';
+
+  // Contexto de mercado
+  const ctx = [
+    signal.spx_price ? `SPX: ${signal.spx_price.toFixed(0)}` : null,
+    signal.rsi       ? `RSI: ${signal.rsi.toFixed(1)}` : null,
+    signal.volume_ratio ? `Vol: ${signal.volume_ratio.toFixed(1)}x` : null,
+    signal.vix_level ? `VIX: ${signal.vix_level.toFixed(1)}` : null,
+  ].filter(Boolean).join(' · ');
+
+  // Botones de veredicto
+  const btnCorrect = `<button class="verdict-btn ${verdict === 'CORRECT' ? 'selected-correct' : ''}" data-verdict="CORRECT" data-id="${signal.id}">✅ Correcto</button>`;
+  const btnWrong   = `<button class="verdict-btn ${verdict === 'WRONG'   ? 'selected-wrong'   : ''}" data-verdict="WRONG"   data-id="${signal.id}">❌ No debió entrar</button>`;
+  const btnMissed  = `<button class="verdict-btn ${verdict === 'MISSED'  ? 'selected-missed'  : ''}" data-verdict="MISSED"  data-id="${signal.id}">➕ Faltó esta entrada</button>`;
+
+  // Factores
+  const factors = ['macro', 'sector', 'timing', 'volume', 'spread'];
+  const factorLabels = { macro: '🌍 Macro', sector: '📊 Sector', timing: '⏰ Hora', volume: '📈 Volumen', spread: '💱 Spread' };
+  const factorChips = factors.map(f => {
+    const key = `factor_${f}`;
+    const isSelected = pending ? pending.factors?.includes(f) : signal[key];
+    return `<span class="factor-chip ${isSelected ? 'selected' : ''}" data-factor="${f}">${factorLabels[f]}</span>`;
+  }).join('');
+
+  const savedNotes = pending?.notes ?? signal.label_notes ?? '';
+  const saveBtnClass = verdict ? 'save-btn saved' : 'save-btn';
+  const saveBtnText = verdict ? '✅ Guardado' : '💾 Guardar etiqueta';
+
+  return `
+    <div class="signal-card ${labelClass}" data-id="${signal.id}">
+      <div class="signal-header">
+        <span class="signal-time">${signal.signal_time?.substring(0,5) || '—'}</span>
+        <span class="badge ${typeClass} signal-type-badge">${typeLabel}</span>
+        <span class="signal-direction ${dirClass}">${signal.direction}</span>
+        <span class="signal-strategy">${signal.strategy_id} ${ctx ? '· ' + ctx : ''}</span>
+        ${pnlHtml}
+        <span class="signal-verdict">${verdictBadge}</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="signal-detail">
+        <div class="detail-grid">
+          ${signal.option_strike ? `<div class="detail-item"><div class="detail-key">Strike</div><div class="detail-value">${signal.option_strike}</div></div>` : ''}
+          ${signal.entry_price   ? `<div class="detail-item"><div class="detail-key">Entrada</div><div class="detail-value">$${signal.entry_price.toFixed(2)}</div></div>` : ''}
+          ${signal.exit_price    ? `<div class="detail-item"><div class="detail-key">Salida</div><div class="detail-value">$${signal.exit_price.toFixed(2)}</div></div>` : ''}
+          ${signal.exit_reason   ? `<div class="detail-item"><div class="detail-key">Razón salida</div><div class="detail-value">${signal.exit_reason}</div></div>` : ''}
+          ${signal.reject_reason ? `<div class="detail-item"><div class="detail-key">Razón rechazo</div><div class="detail-value">${signal.reject_reason}</div></div>` : ''}
+          ${signal.market_regime ? `<div class="detail-item"><div class="detail-key">Régimen</div><div class="detail-value">${signal.market_regime}</div></div>` : ''}
+        </div>
+
+        <div class="label-panel">
+          <div class="label-title">Tu evaluación</div>
+          <div class="verdict-buttons">
+            ${btnCorrect}${btnWrong}${btnMissed}
+          </div>
+          <div class="factors-section">
+            <div class="factors-title">¿Qué factor influyó? (opcional)</div>
+            <div class="factors-grid">${factorChips}</div>
+          </div>
+          <textarea class="notes-input" placeholder="Nota opcional (ej: 'mercado muy volátil esa hora')...">${savedNotes}</textarea>
+          <button class="${saveBtnClass}" data-id="${signal.id}">${saveBtnText}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ─── Interacciones ────────────────────────────────────────────────────────
+function toggleCard(card) {
+  card.classList.toggle('expanded');
+}
+
+function selectVerdict(btn) {
+  const card = btn.closest('.signal-card');
+  const id = parseInt(card.dataset.id);
+  const verdict = btn.dataset.verdict;
+
+  // Actualizar UI
+  card.querySelectorAll('.verdict-btn').forEach(b => {
+    b.classList.remove('selected-correct', 'selected-wrong', 'selected-missed');
+  });
+  btn.classList.add(`selected-${verdict.toLowerCase()}`);
+
+  // Actualizar pending
+  if (!pendingLabels[id]) pendingLabels[id] = {};
+  pendingLabels[id].verdict = verdict;
+  pendingLabels[id].factors = pendingLabels[id].factors || [];
+
+  // Actualizar borde de la card
+  card.classList.remove('labeled-correct', 'labeled-wrong', 'labeled-missed');
+  card.classList.add(`labeled-${verdict.toLowerCase()}`);
+
+  // Habilitar botón guardar todo
+  document.getElementById('btn-save-all').disabled = false;
+}
+
+function markPending(card) {
+  const id = parseInt(card.dataset.id);
+  if (!pendingLabels[id]) pendingLabels[id] = {};
+  const factors = [...card.querySelectorAll('.factor-chip.selected')].map(c => c.dataset.factor);
+  pendingLabels[id].factors = factors;
+  pendingLabels[id].notes = card.querySelector('.notes-input')?.value || '';
+  document.getElementById('btn-save-all').disabled = false;
+}
+
+async function saveSingleLabel(card) {
+  const id = parseInt(card.dataset.id);
+  const pending = pendingLabels[id];
+  if (!pending?.verdict) {
+    showToast('Selecciona un veredicto primero', 'error');
+    return;
+  }
+
+  const btn = card.querySelector('.save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try {
+    const res = await fetch('/calibrator/label', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        signal_id:      id,
+        verdict:        pending.verdict,
+        factor_macro:   pending.factors?.includes('macro')  || false,
+        factor_sector:  pending.factors?.includes('sector') || false,
+        factor_timing:  pending.factors?.includes('timing') || false,
+        factor_volume:  pending.factors?.includes('volume') || false,
+        factor_spread:  pending.factors?.includes('spread') || false,
+        notes:          pending.notes || '',
+      }),
+    });
+
+    if (res.ok) {
+      btn.className = 'save-btn saved';
+      btn.textContent = '✅ Guardado';
+      delete pendingLabels[id];
+      // Actualizar señal en memoria
+      const sig = allSignals.find(s => s.id === id);
+      if (sig) sig.verdict = pending.verdict;
+      showToast('Etiqueta guardada', 'success');
+    } else {
+      throw new Error('Error del servidor');
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '💾 Guardar etiqueta';
+    showToast('Error guardando etiqueta', 'error');
+  }
+}
+
+async function saveAllLabels() {
+  const labels = Object.entries(pendingLabels)
+    .filter(([, p]) => p.verdict)
+    .map(([id, p]) => ({
+      signal_id:     parseInt(id),
+      verdict:       p.verdict,
+      factor_macro:  p.factors?.includes('macro')  || false,
+      factor_sector: p.factors?.includes('sector') || false,
+      factor_timing: p.factors?.includes('timing') || false,
+      factor_volume: p.factors?.includes('volume') || false,
+      factor_spread: p.factors?.includes('spread') || false,
+      notes:         p.notes || '',
+    }));
+
+  if (labels.length === 0) {
+    showToast('No hay etiquetas pendientes', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-save-all');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try {
+    const res = await fetch('/calibrator/label/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labels }),
+    });
+    const data = await res.json();
+    showToast(`✅ ${data.saved} etiquetas guardadas`, 'success');
+    pendingLabels = {};
+    await loadDiary(currentDate, true);
+  } catch (e) {
+    showToast('Error guardando etiquetas', 'error');
+  } finally {
+    btn.textContent = '✅ Guardar todo';
+    btn.disabled = Object.keys(pendingLabels).length === 0;
+  }
+}
+
+async function forceFlush() {
+  const btn = document.getElementById('btn-flush');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+  try {
+    const res = await fetch('/calibrator/flush', { method: 'POST' });
+    const data = await res.json();
+    showToast(`💾 ${data.signals_saved} señales guardadas en DB`, 'success');
+    await loadDiary(currentDate);
+  } catch (e) {
+    showToast('Error guardando buffer', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Guardar buffer';
+  }
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = `toast ${type} show`;
+  setTimeout(() => { toast.classList.remove('show'); }, 3000);
+}
+</script>
+</body>
+</html>

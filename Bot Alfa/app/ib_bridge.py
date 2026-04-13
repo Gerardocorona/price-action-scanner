@@ -1,0 +1,271 @@
+import asyncio
+import logging
+import threading
+from ib_insync import IB, util
+import time
+
+logger = logging.getLogger("ibg.ib_bridge")
+
+class SyncIBBridge:
+    def __init__(self, host, port, client_id):
+        self.host = host
+        self.port = port
+        self.client_id = client_id
+        self.ib = IB()
+        self.loop = None
+        self.thread = None
+        self._ready = threading.Event()
+
+    def _run_loop(self):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        util.patchAsyncio()
+        self.loop.run_until_complete(self._maintain_connection())
+
+    async def _maintain_connection(self):
+        logger.info(f"Sync Bridge thread started for {self.host}:{self.port}")
+        backoff = 5
+        while True:
+            try:
+                if not self.ib.isConnected():
+                    logger.info(f"Sync Bridge attempting connection (Backoff: {backoff}s)...")
+                    await self.ib.connectAsync(self.host, self.port, self.client_id)
+                    if self.ib.isConnected():
+                        logger.info("✅ Sync Bridge CONNECTED")
+                        self._ready.set()
+                        backoff = 5 # Reset backoff on success
+                    else:
+                        logger.warning("Connection attempt failed.")
+                        await asyncio.sleep(backoff)
+                        backoff = min(backoff + 5, 30) # Exponential backoff capped at 30s
+                else:
+                    # Si está conectado, verificar más frecuentemente (cada 5s)
+                    await asyncio.sleep(5)
+            except Exception as e:
+                logger.error(f"Sync Bridge connection error: {e}")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff + 5, 30)
+
+    def start(self):
+        self.thread = threading.Thread(target=self._run_loop, daemon=True)
+        self.thread.start()
+        logger.info("Waiting for Sync Bridge to connect...")
+        return self._ready.wait(timeout=20)
+
+    def disconnect(self):
+        """Desconecta limpiamente el cliente IB."""
+        if self.loop:
+            self.loop.call_soon_threadsafe(self.ib.disconnect)
+        logger.info("Sync Bridge disconnected.")
+
+    def is_connected(self):
+        return self.ib.isConnected()
+
+    def _serialize(self, raw_result):
+        """Serializa resultados para asegurar tipos básicos."""
+        if isinstance(raw_result, list):
+            result = []
+            for item in raw_result:
+                if isinstance(item, (dict, int, float, bool, str, type(None))):
+                    result.append(item)
+                elif hasattr(item, 'dict'):  # Algunos objetos tienen .dict()
+                    result.append(item.dict())
+                elif hasattr(item, '__dict__'):
+                    # Fallback para objetos simples
+                    d = {}
+                    for k, v in item.__dict__.items():
+                        if not k.startswith('_'):
+                            d[k] = str(v) if not isinstance(v, (int, float, bool, str, list, dict, type(None))) else v
+                    result.append(d)
+                elif hasattr(item, '_asdict'):
+                    # Manejo para namedtuples (como OptionChain)
+                    d = {}
+                    raw_dict = item._asdict()
+                    for k, v in raw_dict.items():
+                        if isinstance(v, (set, frozenset)):
+                            v = list(v)
+                        d[k] = str(v) if not isinstance(v, (int, float, bool, str, list, dict, type(None))) else v
+                    result.append(d)
+                elif hasattr(item, '__slots__'):
+                    # Manejo para objetos con __slots__
+                    d = {}
+                    # ... (rest of slots logic)
+                    slots = item.__slots__
+                    if isinstance(slots, str): slots = [slots]
+                    for k in slots:
+                        if not k.startswith('_'):
+                            try:
+                                v = getattr(item, k)
+                                if isinstance(v, (set, frozenset)):
+                                    v = list(v)
+                                d[k] = str(v) if not isinstance(v, (int, float, bool, str, list, dict, type(None))) else v
+                            except AttributeError:
+                                pass
+                    
+                    # FALLBACK: Force critical fields if not present
+                    for field in ['expirations', 'strikes', 'tradingClass', 'multiplier', 'exchange']:
+                        if field not in d and hasattr(item, field):
+                             v = getattr(item, field)
+                             if isinstance(v, (set, frozenset)):
+                                    v = list(v)
+                             d[field] = str(v) if not isinstance(v, (int, float, bool, str, list, dict, type(None))) else v
+                    result.append(d)
+                else:
+                    result.append(str(item))
+            return result
+        return raw_result
+
+    def call_sync(self, func, *args, **kwargs):
+        """Ejecuta una función de IB de forma síncrona en el hilo del puente."""
+        if not self.loop:
+            return None
+        
+        result = None
+        error = None
+        done = threading.Event()
+
+        def _runner():
+            nonlocal result, error
+            try:
+                # Ejecutar la función directamente en el hilo del puente
+                raw_result = func(*args, **kwargs)
+                result = self._serialize(raw_result)
+            except Exception as e:
+                error = e
+            finally:
+                done.set()
+
+        # Enviar la ejecución al loop del puente
+        self.loop.call_soon_threadsafe(_runner)
+        
+        if not done.wait(timeout=30):
+            raise TimeoutError("Bridge call timeout")
+        
+        if error:
+            raise error
+        return result
+
+    def run_coroutine(self, coro):
+        """
+        Ejecuta una corutina en el loop del puente y espera el resultado (BLOQUEANTE).
+        ADVERTENCIA: No usar dentro de funciones async del bot, usar run_coroutine_async.
+        """
+        if not self.loop:
+            return None
+        
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        try:
+            raw_result = future.result(timeout=30)
+            return self._serialize(raw_result)
+        except Exception as e:
+            logger.error(f"Error in run_coroutine: {e}")
+            raise e
+
+    async def run_coroutine_async(self, coro):
+        """
+        Versión ASÍNCRONA (No bloqueante) de run_coroutine.
+        Permite esperar el resultado sin congelar el Event Loop principal de FastAPI.
+        """
+        if not self.loop:
+            logger.error("❌ IBBridge loop not initialized")
+            return None
+        
+        # Enviar la corutina al loop del hilo de IBKR
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        
+        try:
+            # Envolver el concurrent.futures.Future en un asyncio.Future
+            # Esto permite hacer 'await' sin bloquear el loop actual
+            raw_result = await asyncio.wrap_future(future)
+            return self._serialize(raw_result)
+        except Exception as e:
+            logger.error(f"❌ Error in run_coroutine_async: {e}")
+            raise e
+
+    def get_positions(self):
+        # Mapeo manual para asegurar tipos básicos
+        def _get_pos():
+            positions = self.ib.positions()
+            return [
+                {
+                    "account": p.account,
+                    "contract": {
+                        "symbol": p.contract.symbol,
+                        "secType": p.contract.secType,
+                        "lastTradeDateOrContractMonth": p.contract.lastTradeDateOrContractMonth,
+                        "strike": p.contract.strike,
+                        "right": p.contract.right,
+                        "multiplier": p.contract.multiplier,
+                        "exchange": p.contract.exchange,
+                        "currency": p.contract.currency,
+                        "localSymbol": p.contract.localSymbol
+                    },
+                    "position": float(p.position),
+                    "avgCost": float(p.avgCost)
+                } for p in positions
+            ]
+        return self.call_sync(_get_pos)
+
+    def get_open_trades(self):
+        def _get_trades():
+            trades = self.ib.openTrades()
+            return [
+                {
+                    "contract": {
+                        "symbol": t.contract.symbol, 
+                        "localSymbol": t.contract.localSymbol,
+                        "strike": t.contract.strike,
+                        "right": t.contract.right,
+                        "lastTradeDateOrContractMonth": t.contract.lastTradeDateOrContractMonth,
+                        "conId": t.contract.conId
+                    },
+                    "order": {"orderId": t.order.orderId, "action": t.order.action, "totalQuantity": float(t.order.totalQuantity)},
+                    "orderStatus": {"status": t.orderStatus.status, "filled": float(t.orderStatus.filled), "remaining": float(t.orderStatus.remaining)}
+                } for t in trades
+            ]
+        return self.call_sync(_get_trades)
+
+    def get_executions(self):
+        def _get_execs():
+            execs = self.ib.reqExecutions()
+            return [
+                {
+                    "execId": e.execution.execId,
+                    "time": str(e.execution.time),
+                    "symbol": e.contract.symbol,
+                    "localSymbol": e.contract.localSymbol,
+                    "contract": {
+                        "symbol": e.contract.symbol,
+                        "localSymbol": e.contract.localSymbol,
+                        "strike": e.contract.strike,
+                        "right": e.contract.right,
+                        "expiry": e.contract.lastTradeDateOrContractMonth,
+                        "lastTradeDateOrContractMonth": e.contract.lastTradeDateOrContractMonth,
+                        "conId": e.contract.conId
+                    },
+                    "side": e.execution.side,
+                    "shares": float(e.execution.shares),
+                    "price": float(e.execution.price),
+                    "realizedPNL": float(e.commissionReport.realizedPNL) if e.commissionReport else 0.0
+                } for e in execs
+            ]
+        return self.call_sync(_get_execs)
+
+# Global instance
+_bridge = None
+
+def get_bridge(settings, client_id_override=None):
+    global _bridge
+    
+    target_client_id = client_id_override if client_id_override is not None else settings.ib_client_id
+    
+    # Si ya existe pero el client_id es diferente, desconectar y recrear
+    if _bridge is not None and _bridge.client_id != target_client_id:
+        logger.info(f"Recreating bridge with new client_id: {target_client_id} (was {_bridge.client_id})")
+        _bridge.disconnect()
+        _bridge = None
+        
+    if _bridge is None:
+        _bridge = SyncIBBridge(settings.ib_host, settings.ib_port, target_client_id)
+        _bridge.start()
+    return _bridge

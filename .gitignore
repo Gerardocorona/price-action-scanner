@@ -1,37 +1,66 @@
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+*.py[cod]
 *.egg-info/
-dist/
-build/
+venv/
+.venv/
 *.egg
 
-# Logs y outputs temporales
-scanner_output.log
+# Environment & Credentials
+.env
+*.json.bak
+antigravity_memory.json
+
+# Logs & temp data
+logs/
 *.log
+bot_err.log
+bot_out.log
+bot_requests.log
+bot_webhook.log
+live_bot_log.txt
+watchdog.log
+uvicorn_stderr.log
+uvicorn_stdout.log
+startup_final.log
+startup_verify.log
+check_out.txt
 
-# Reportes HTML generados (muy pesados)
-reports/
+# Data & cache
+cache/
+data/
+*.csv
+*.pickle
+*.pkl
+*.db
 
-# Screenshots (generadas en runtime)
-screenshots/
+# Archives & backups
+*.rar
+*.zip
+*.tar.gz
+Bot backup/
+ALFA_MIGRATION_CLEAN/
+ALFA_MIGRATION_CLEAN.rar
+ALFA_MIGRATION_CLEAN.zip
+ALFA_FULL_MIGRATION.zip
 
-# Archivos de diagnóstico temporales
-diagnostic_lateral.py
-
-# Entornos virtuales
-.venv/
-venv/
-env/
+# Old/legacy directories
+0.127.0/
+0.28.1/
+0.40.0/
+1.2.1/
+2.12.0/
+TV-BOT-TWS - Confirmar orden hija - Criterios contratos.rar
+TV-BOT-TWS-Confirmar orden hija-Criterios contratos 1/
 
 # IDE
 .vscode/
 .idea/
-*.swp
 
-# Secrets
-.env
-*.env
+# OS
+.DS_Store
+Thumbs.db
+
+# Full status dumps
+full_status.json
+analysis_report.txt

@@ -1,0 +1,12 @@
+ib_insync
+fastapi
+uvicorn
+pandas
+pyyaml
+pydantic
+pydantic-settings
+scipy
+numpy
+python-dotenv
+aiohttp
+jinja2

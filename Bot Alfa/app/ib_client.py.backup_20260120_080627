@@ -1,0 +1,550 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import math
+import threading
+import time
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Iterable, List, Optional, Sequence
+from types import SimpleNamespace
+
+from ib_insync import Contract, IB, Option, Order, Stock, Ticker, util
+
+from .config import Settings, get_settings
+from .models import OptionContractData, TickerInfo
+from .ib_bridge import get_bridge
+
+logger = logging.getLogger("ibg.bot")
+
+
+@dataclass(slots=True)
+class _BracketParams:
+    entry_price: float
+    take_profit_pct: float = 0.20  # 20% TP
+    stop_loss_pct: float = 0.12  # 12% SL
+
+
+class IBClient:
+    """
+    Cliente IBKR con ib_insync a través de un puente síncrono.
+    """
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self._settings = settings or get_settings()
+        # Assuming get_bridge returns a SyncIBBridge instance or can be replaced by direct instantiation
+        # The instruction implies a change in how the bridge is initialized, potentially requiring new parameters
+        # For now, I'll assume get_bridge can still be used, or that SyncIBBridge can be instantiated without explicit port/client_id if they are part of settings.
+        # If SyncIBBridge needs port/client_id directly, the __init__ signature of IBClient would need to change.
+        # Sticking to the original signature, I'll adapt the bridge initialization.
+        self._bridge = get_bridge(self._settings) # Keep original bridge init, or adapt if SyncIBBridge is a direct replacement
+        self._chain_cache = {}  # Cache para reqSecDefOptParams
+        self._is_connected: bool = False
+        self._connected_event = asyncio.Event()
+        self._op_lock = asyncio.Lock()
+
+    def is_connected(self) -> bool:
+        return self._bridge.is_connected()
+
+    async def get_account_balance(self) -> float:
+        """Obtiene el balance de la cuenta usando el puente."""
+        def _get_balance():
+            tags = self._bridge.ib.accountValues()
+            for tag in tags:
+                if tag.tag == "NetLiquidation" and tag.currency == "USD":
+                    return float(tag.value)
+            return 0.0
+
+        await self._ensure_connected()
+        return self._bridge.call_sync(_get_balance)
+
+    async def get_option_chain(self, ticker: str) -> List[dict]:
+        """Obtiene la cadena de opciones optimizada (1 exp, 4 strikes) para reducir latencia."""
+        start_time = time.perf_counter()
+        async def _get_chain():
+            from ib_insync import Stock, Option, util
+            import datetime as dt
+            import bisect
+            
+            # 1. Obtener subyacente
+            stock = Stock(ticker, "SMART", "USD")
+            await self._bridge.ib.qualifyContractsAsync(stock)
+        
+            # 1. Verificar caché
+            if ticker in self._chain_cache:
+                logger.info(f"[CACHE] Usando cadena en caché para {ticker}")
+                chains = self._chain_cache[ticker]
+            else:
+                # 2. Obtener parámetros de opciones (Lento, ~10-15s)
+                logger.info(f"Fetching option chain parameters for {ticker}...")
+                t0 = time.perf_counter()
+                # stock is already qualified
+                chains = await self._bridge.ib.reqSecDefOptParamsAsync(stock.symbol, '', stock.secType, stock.conId)
+                t1 = time.perf_counter()
+                logger.info(f"[TIMING] reqSecDefOptParams took {(t1-t0)*1000:.2f}ms")
+                
+                if chains:
+                    self._chain_cache[ticker] = chains
+                    logger.info(f"[CACHE] Cadena guardada para {ticker}")
+            
+            if not chains:
+                return []
+            
+            # Log all chains for debugging
+            for i, c in enumerate(chains):
+                logger.info(f"[{ticker}] Chain {i}: Exchange={getattr(c, 'exchange', 'N/A')}, TradingClass={getattr(c, 'tradingClass', 'N/A')}, Multiplier={getattr(c, 'multiplier', 'N/A')}")
+
+            # Helper to access attributes or dict keys
+            def get_val(obj, key):
+                val = obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+                return val if val is not None else []
+
+            # chain = next((c for c in chains if c.exchange == "SMART"), chains[0])
+            chain = next((c for c in chains if get_val(c, 'exchange') == "SMART"), chains[0])
+            target_trading_class = get_val(chain, 'tradingClass')
+            target_multiplier = get_val(chain, 'multiplier')
+            logger.info(f"[{ticker}] Selected chain: TradingClass={target_trading_class}, Multiplier={target_multiplier}")
+            
+            # 3. Filtrar expiraciones (SOLO LA PRIMERA VÁLIDA)
+            today = dt.date.today()
+            raw_exps = get_val(chain, 'expirations')
+            logger.info(f"[{ticker}] Raw expirations type: {type(raw_exps)}, content: {raw_exps}")
+            expirations = sorted(raw_exps)
+            
+            try:
+                # Convertir a objetos date
+                valid_dates = []
+                for e in expirations:
+                    d = dt.datetime.strptime(e, "%Y%m%d").date()
+                    if (d - today).days >= 0:
+                        valid_dates.append(d)
+                
+                if not valid_dates:
+                    logger.warning(f"[{ticker}] No valid expirations found.")
+                    return []
+
+                # Lógica de Selección de Expiración
+                ETFS = ["SPY", "QQQ", "IWM", "DIA", "TNA", "SOXL", "GLD", "SLV", "USO"]
+                is_etf = ticker.upper() in ETFS
+                
+                target_date = None
+                
+                if is_etf:
+                    # Para ETFs: La más cercana (incluso diaria)
+                    target_date = valid_dates[0]
+                    logger.info(f"[{ticker}] ETF detected. Selected nearest expiration: {target_date}")
+                else:
+                    # Para Stocks: Preferir Viernes (weekday 4)
+                    # Buscar el primer viernes disponible
+                    friday_dates = [d for d in valid_dates if d.weekday() == 4]
+                    if friday_dates:
+                        target_date = friday_dates[0]
+                        logger.info(f"[{ticker}] Stock detected. Selected nearest Friday: {target_date}")
+                    else:
+                        # Fallback: Si no hay viernes, usar la más cercana
+                        target_date = valid_dates[0]
+                        logger.info(f"[{ticker}] Stock detected but no Friday found. Fallback to nearest: {target_date}")
+
+                target_exp = target_date.strftime("%Y%m%d")
+                logger.info(f"[{ticker}] Target expiration string: {target_exp}")
+
+            except Exception as e:
+                logger.error(f"[{ticker}] Error filtering expirations: {e}")
+                return []
+            
+            # 4. Obtener precio actual
+            curr_price = 0
+            try:
+                logger.info(f"[{ticker}] Requesting tickers for price...")
+                tickers = await self._bridge.ib.reqTickersAsync(stock)
+                logger.info(f"[{ticker}] Tickers received: {len(tickers) if tickers else 'None'}")
+                
+                if tickers:
+                    # Check for NaN safely
+                    last = tickers[0].last
+                    close = tickers[0].close
+                    curr_price = last if last is not None and not math.isnan(last) else close
+                    if curr_price is None or math.isnan(curr_price):
+                        curr_price = 0
+                else:
+                     logger.warning(f"[{ticker}] No tickers received")
+            except Exception as e:
+                logger.error(f"[{ticker}] Error fetching price: {e}")
+                curr_price = 0
+            
+            logger.info(f"[{ticker}] Current price: {curr_price}")
+
+            if math.isnan(curr_price) or curr_price <= 0:
+                # Fallback si no hay precio: usar todos los strikes (peligroso, pero raro)
+                relevant_strikes = sorted(get_val(chain, 'strikes'))[:40] # Limit fallback to 40
+                logger.warning(f"[{ticker}] Invalid price, using fallback strikes: {len(relevant_strikes)}")
+            else:
+                # Filtrar strikes +/- 15% para encontrar opciones OTM baratas
+                strikes = sorted(get_val(chain, 'strikes'))
+                relevant_strikes = [s for s in strikes if curr_price * 0.85 <= s <= curr_price * 1.15]
+                logger.info(f"[{ticker}] Total strikes: {len(strikes)}, Relevant (15%): {len(relevant_strikes)}")
+                
+                # REMOVED: Hard limit of 20 strikes. We rely on the 15% range to capture all potential candidates.
+                # If too many, maybe limit to 50 to avoid timeouts, but 15% usually yields reasonable count.
+                if len(relevant_strikes) > 50:
+                     # Si aún son demasiados, recortar extremos pero mantener centro amplio
+                     idx = bisect.bisect_left(relevant_strikes, curr_price)
+                     start = max(0, idx - 25)
+                     end = min(len(relevant_strikes), idx + 25)
+                     relevant_strikes = relevant_strikes[start:end]
+                     logger.info(f"[{ticker}] Limited to 50 strikes around money.")
+
+            contracts = []
+            for strike in relevant_strikes:
+                for right in ["C", "P"]:
+                    # IMPORTANTE: multiplier y tradingClass son vitales para evitar "Unknown contract"
+                    contracts.append(Option(
+                        ticker, target_exp, strike, right, "SMART", 
+                        multiplier=str(target_multiplier) if target_multiplier else "100", 
+                        currency="USD",
+                        tradingClass=str(target_trading_class) if target_trading_class else None
+                    ))
+            
+            if not contracts:
+                logger.warning(f"[{ticker}] No contracts generated. Relevant strikes: {relevant_strikes}")
+                return []
+            
+            logger.info(f"Qualifying {len(contracts)} contracts for {ticker}...")
+            
+            # 5. Calificar contratos (todos de una vez, son pocos)
+            qualified = await self._bridge.ib.qualifyContractsAsync(*contracts)
+            logger.info(f"[{ticker}] Qualified contracts: {len(qualified)}")
+            
+            if not qualified:
+                logger.warning(f"[{ticker}] No contracts were qualified by IBKR")
+                return []
+
+            # 6. Obtener market data
+            logger.info(f"[{ticker}] Requesting market data for {len(qualified)} contracts...")
+            tickers = await self._bridge.ib.reqTickersAsync(*qualified)
+            logger.info(f"[{ticker}] Market data tickers received: {len(tickers)}")
+            
+            # 7. Serializar resultados
+            results = []
+            for t in tickers:
+                try:
+                    exp_date = dt.datetime.strptime(t.contract.lastTradeDateOrContractMonth, "%Y%m%d").date()
+                    results.append({
+                        "symbol": t.contract.localSymbol,
+                        "type": "CALL" if t.contract.right == "C" else "PUT",
+                        "expiry": t.contract.lastTradeDateOrContractMonth,
+                        "dte": (exp_date - today).days,
+                        "strike": float(t.contract.strike),
+                        "bid": float(t.bid) if not math.isnan(t.bid) else 0.0,
+                        "ask": float(t.ask) if not math.isnan(t.ask) else 0.0,
+                        "last": float(t.last) if not math.isnan(t.last) else 0.0
+                    })
+                except Exception as e:
+                    logger.error(f"[{ticker}] Error serializing ticker {t.contract.localSymbol}: {e}")
+
+            logger.info(f"[{ticker}] Final results count: {len(results)}")
+            return results
+
+        await self._ensure_connected()
+        try:
+            res = self._bridge.run_coroutine(_get_chain())
+            elapsed = (time.perf_counter() - start_time) * 1000
+            logger.info(f"[LATENCY] get_option_chain for {ticker} took {elapsed:.2f}ms")
+            return res
+        except Exception as e:
+            logger.error(f"Error obteniendo cadena de opciones para {ticker}: {e}")
+            return []
+
+    async def connect(self):
+        """Verifica la conexión a través del puente."""
+        if self._bridge.is_connected():
+            self._is_connected = True
+            self._connected_event.set()
+            logger.info("✅ Conectado a IBKR a través del puente síncrono.")
+        else:
+            logger.warning("⏳ Esperando conexión del puente...")
+
+    async def _ensure_connected(self):
+        """Asegura que la conexión esté activa."""
+        if not self.is_connected():
+            await self.connect()
+            if not self.is_connected():
+                raise RuntimeError("No hay conexión con IBKR.")
+
+    async def get_positions(self) -> List:
+        await self._ensure_connected()
+        return self._bridge.get_positions()
+
+    async def get_open_trades(self) -> List:
+        await self._ensure_connected()
+        return self._bridge.get_open_trades()
+
+    async def get_daily_executions(self) -> List:
+        await self._ensure_connected()
+        return self._bridge.get_executions()
+
+    async def qualify_contract(self, option: OptionContractData):
+        """Califica un contrato de opción usando el puente."""
+        async def _qualify():
+            from ib_insync import Option
+            contract = Option(
+                symbol=option.symbol,
+                lastTradeDateOrContractMonth=option.lastTradeDateOrContractMonth,
+                strike=option.strike,
+                right=option.right,
+                multiplier=option.multiplier,
+                exchange="SMART",
+                currency="USD"
+            )
+            qualified = await self._bridge.ib.qualifyContractsAsync(contract)
+            if not qualified:
+                return None
+            res = qualified[0]
+            return {
+                "conId": res.conId,
+                "symbol": res.symbol,
+                "localSymbol": res.localSymbol,
+                "exchange": "SMART",
+                "lastTradeDateOrContractMonth": res.lastTradeDateOrContractMonth,
+                "strike": res.strike,
+                "right": res.right,
+                "multiplier": res.multiplier
+            }
+
+        await self._ensure_connected()
+        try:
+            res_dict = self._bridge.run_coroutine(_qualify())
+            if not res_dict:
+                raise RuntimeError(f"La API no devolvió un contrato calificado para {option.localSymbol}")
+            return SimpleNamespace(**res_dict)
+        except Exception as e:
+            logger.error(f"Error calificando contrato: {e}")
+            raise RuntimeError(f"No se pudo calificar el contrato: {e}")
+
+    async def get_ticker_info(self, symbol: str) -> TickerInfo:
+        """Obtiene información de precio para un ticker."""
+        async def _get_ticker():
+            from ib_insync import Stock
+            contract = Stock(symbol, "SMART", "USD")
+            await self._bridge.ib.qualifyContractsAsync(contract)
+            tickers = await self._bridge.ib.reqTickersAsync(contract)
+            if not tickers:
+                return None
+            t = tickers[0]
+            return {
+                "symbol": symbol,
+                "last": float(t.last) if not math.isnan(t.last) else float(t.close),
+                "close": float(t.close) if not math.isnan(t.close) else 0.0,
+                "bid": float(t.bid) if not math.isnan(t.bid) else 0.0,
+                "ask": float(t.ask) if not math.isnan(t.ask) else 0.0
+            }
+
+        await self._ensure_connected()
+        res = self._bridge.run_coroutine(_get_ticker())
+        if not res:
+            raise RuntimeError(f"No se pudo obtener ticker para {symbol}")
+        return TickerInfo(**res)
+
+    async def place_bracket_order(self, symbol: str, action: str, quantity: int, limit_price: float, tp_pct: float, sl_pct: float):
+        """Coloca una orden bracket usando el puente."""
+        async def _place():
+            from ib_insync import Stock, LimitOrder, StopOrder
+            contract = Stock(symbol, "SMART", "USD")
+            await self._bridge.ib.qualifyContractsAsync(contract)
+            
+            parent = LimitOrder(action, quantity, limit_price, account=self._settings.ib_account, transmit=False)
+            
+            exit_action = "SELL" if action == "BUY" else "BUY"
+            tp_price = limit_price * (1 + tp_pct) if action == "BUY" else limit_price * (1 - tp_pct)
+            sl_price = limit_price * (1 - sl_pct) if action == "BUY" else limit_price * (1 + sl_pct)
+            
+            tp = LimitOrder(exit_action, quantity, round(tp_price, 2), account=self._settings.ib_account, transmit=False, parentId=parent.orderId)
+            sl = StopOrder(exit_action, quantity, round(sl_price, 2), account=self._settings.ib_account, transmit=True, parentId=parent.orderId)
+            
+            # placeOrder is non-blocking, but we are in async context, so it's fine.
+            # We don't need to await it unless we want to wait for fills, which we don't here.
+            for o in [parent, tp, sl]:
+                self._bridge.ib.placeOrder(contract, o)
+            return parent.orderId
+
+        await self._ensure_connected()
+        return self._bridge.run_coroutine(_place())
+
+    async def place_bracket_order_complete(
+        self,
+        option_symbol: str,
+        entry_price: float,
+        tp_price: float,
+        sl_price: float,
+        qty: int,
+        use_trailing_stop: bool = False,
+        trailing_percent: float = 10.0
+    ) -> Optional[int]:
+        """Coloca una orden bracket completa para opciones usando el puente."""
+        start_time = time.perf_counter()
+        async def _place():
+            from ib_insync import Option, LimitOrder, StopOrder
+            # 1. Crear contrato de opción
+            # Asumimos que option_symbol es el localSymbol
+            contract = Option(localSymbol=option_symbol, exchange="SMART", currency="USD")
+            await self._bridge.ib.qualifyContractsAsync(contract)
+            
+            # 2. Orden de entrada (LMT)
+            parent = LimitOrder("BUY", qty, entry_price, account=self._settings.ib_account, transmit=False)
+            
+            # 3. Orden de salida TP (LMT)
+            tp = LimitOrder("SELL", qty, tp_price, account=self._settings.ib_account, transmit=False, parentId=parent.orderId)
+            
+            # 4. Orden de salida SL (STP o TRAIL)
+            if use_trailing_stop:
+                from ib_insync import Order
+                sl = Order(
+                    action="SELL",
+                    totalQuantity=qty,
+                    orderType="TRAIL",
+                    trailingPercent=trailing_percent,
+                    account=self._settings.ib_account,
+                    transmit=True,
+                    parentId=parent.orderId
+                )
+            else:
+                sl = StopOrder("SELL", qty, sl_price, account=self._settings.ib_account, transmit=True, parentId=parent.orderId)
+            
+            # 5. Enviar órdenes
+            self._bridge.ib.placeOrder(contract, parent)
+            self._bridge.ib.placeOrder(contract, tp)
+            self._bridge.ib.placeOrder(contract, sl)
+            
+            logger.info(f"✅ Bracket Order enviada para {option_symbol}: Qty={qty}, Entry={entry_price}, TP={tp_price}, SL={sl_price if not use_trailing_stop else 'TRAIL '+str(trailing_percent)+'%'}")
+            return parent.orderId
+
+        await self._ensure_connected()
+        try:
+            order_id = self._bridge.run_coroutine(_place())
+            elapsed = (time.perf_counter() - start_time) * 1000
+            logger.info(f"[LATENCY] place_bracket_order_complete for {option_symbol} took {elapsed:.2f}ms. OrderID: {order_id}")
+            return order_id
+        except Exception as e:
+            logger.error(f"Error colocando bracket order completa: {e}", exc_info=True)
+            return None
+
+    async def prefetch_option_chains(self, tickers: List[str]):
+        """
+        Pre-carga la cadena de opciones para los tickers dados.
+        Ejecutar esto al inicio para evitar latencia en la primera operación.
+        """
+        await self._ensure_connected() # Ensure connection before prefetching
+        logger.info(f"🔥 Iniciando pre-calentamiento de opciones para: {tickers}")
+        
+        async def _fetch_chain(t_symbol):
+            from ib_insync import Stock
+            # Ejecutado en el hilo del bridge
+            stock = Stock(t_symbol, 'SMART', 'USD')
+            await self._bridge.ib.qualifyContractsAsync(stock)
+            return await self._bridge.ib.reqSecDefOptParamsAsync(stock.symbol, '', stock.secType, stock.conId)
+
+        for ticker in tickers:
+            try:
+                logger.info(f"🔥 Pre-fetching {ticker}...")
+                # Usamos run_coroutine para ejecutar en el hilo correcto
+                chains = self._bridge.run_coroutine(_fetch_chain(ticker))
+                
+                if chains:
+                    self._chain_cache[ticker] = chains
+                    logger.info(f"✅ {ticker} cached ({len(chains)} chains)")
+            except Exception as e:
+                logger.error(f"❌ Error pre-fetching {ticker}: {e}")
+        logger.info("🔥 Pre-calentamiento completado.")
+
+    async def req_mkt_data(self, contract_dict: dict) -> TickerInfo:
+        """Solicita datos de mercado para un contrato (dict) usando el puente."""
+        async def _get_ticker():
+            from ib_insync import Contract
+            c = Contract(**contract_dict)
+            tickers = await self._bridge.ib.reqTickersAsync(c)
+            if not tickers: return None
+            t = tickers[0]
+            return {
+                "symbol": c.symbol,
+                "last": float(t.last) if not math.isnan(t.last) else float(t.close),
+                "close": float(t.close) if not math.isnan(t.close) else 0.0,
+                "bid": float(t.bid) if not math.isnan(t.bid) else 0.0,
+                "ask": float(t.ask) if not math.isnan(t.ask) else 0.0
+            }
+
+        await self._ensure_connected()
+        res = self._bridge.run_coroutine(_get_ticker())
+        if not res:
+            raise RuntimeError(f"No se pudo obtener datos para {contract_dict.get('symbol')}")
+        return TickerInfo(**res)
+
+    async def close_position(self, contract_dict: dict) -> bool:
+        """Cierra una posición usando el puente."""
+        async def _close():
+            from ib_insync import Contract, MarketOrder
+            c = Contract(**contract_dict)
+            await self._bridge.ib.qualifyContractsAsync(c)
+            positions = [p for p in self._bridge.ib.positions() if p.contract.conId == c.conId]
+            if not positions:
+                return False
+            pos = positions[0]
+            action = "SELL" if pos.position > 0 else "BUY"
+            order = MarketOrder(action, abs(pos.position), account=self._settings.ib_account)
+            self._bridge.ib.placeOrder(c, order)
+            return True
+
+        await self._ensure_connected()
+        return self._bridge.run_coroutine(_close())
+
+    async def place_dca_order(self, contract_dict: dict, current_qty: float, current_avg_cost: float, new_capital: float, tp_percent: float, sl_percent: float) -> bool:
+        """Coloca una orden DCA usando el puente."""
+        async def _place_dca():
+            from ib_insync import Contract, LimitOrder
+            c = Contract(**contract_dict)
+            await self._bridge.ib.qualifyContractsAsync(c)
+            
+            # Calcular precio de entrada (usar el último precio)
+            tickers = await self._bridge.ib.reqTickersAsync(c)
+            if not tickers: return False
+            price = tickers[0].last if not math.isnan(tickers[0].last) else tickers[0].close
+            if math.isnan(price) or price <= 0: return False
+            
+            # Calcular cantidad
+            qty = int(new_capital / (price * 100))
+            if qty <= 0: qty = 1
+            
+            # Orden principal
+            order = LimitOrder("BUY", qty, price, account=self._settings.ib_account)
+            self._bridge.ib.placeOrder(c, order)
+            return True
+
+        await self._ensure_connected()
+        return self._bridge.run_coroutine(_place_dca())
+
+    async def get_portfolio(self) -> List[dict]:
+        """Obtiene el portfolio usando el puente."""
+        def _get_portfolio():
+            items = self._bridge.ib.portfolio()
+            return [
+                {
+                    "contract": {"symbol": i.contract.symbol, "localSymbol": i.contract.localSymbol, "conId": i.contract.conId},
+                    "position": float(i.position),
+                    "marketPrice": float(i.marketPrice),
+                    "marketValue": float(i.marketValue),
+                    "averageCost": float(i.averageCost),
+                    "unrealizedPNL": float(i.unrealizedPNL),
+                    "realizedPNL": float(i.realizedPNL)
+                } for i in items
+            ]
+
+        await self._ensure_connected()
+        return self._bridge.call_sync(_get_portfolio)
+
+    async def disconnect(self):
+        """Desconecta el puente."""
+        # El puente es un singleton y daemon, se cerrará con el proceso.
+        pass
+
+# Instancia global
+client = IBClient()
